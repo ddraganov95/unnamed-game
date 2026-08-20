@@ -1,0 +1,4 @@
+*.exe
+
+# IDE and OS files
+.vscode/
