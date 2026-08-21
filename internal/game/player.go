@@ -2,6 +2,7 @@ package game
 
 import (
 	"math"
+	"time"
 )
 
 type Player struct {
@@ -9,6 +10,7 @@ type Player struct {
 	Health
 	Experience
 	Direction
+	PlayerSessionSummary
 	KeyBindings        map[rune]func(g *Game)
 	TypingKeyBindings  map[rune]func(g *Game)
 	DisplayChan        chan string
@@ -117,6 +119,10 @@ func NewPlayer(id string) *Player {
 		EquippedAttack: AttackBasic,
 		PlayerState:    StatePlaying,
 		DisplayChan:    make(chan string, 100),
+		PlayerSessionSummary: PlayerSessionSummary{
+			PlayerID:     id,
+			SessionStart: time.Now(),
+		},
 	}
 	player.Experience = Experience{Level: 1, ExperienceVal: 0}
 	player.UnlockAttacks()
@@ -148,9 +154,10 @@ func (player *Player) IsBlocking() bool {
 	return true
 }
 func (player *Player) TakeDamage(damage Damage, game *Game) {
-	damageToTake := (damage.Value * (100 - PlayerDamageReductionPercent)) / 100
-	player.CurrentHealth -= int(damageToTake)
+	damageToTake := int((damage.Value * (100 - PlayerDamageReductionPercent)) / 100)
+	player.CurrentHealth -= damageToTake
 	player.LastDamageRecieved = damage
+	player.DamageTaken += damageToTake
 	game.CreateLog("%s %s hits %s for %d damage", LogInfo, damage.EntityID, player.GetID(), damageToTake)
 }
 func (player *Player) GetDamageMultiplierPercent() int {
@@ -164,6 +171,7 @@ func (player *Player) GetProjectileSpeed() int {
 }
 func (player *Player) GainXp(xp int) {
 	player.ExperienceVal += xp
+	player.XPGained += xp
 	if player.LevelUp() {
 		player.UnlockAttacks()
 	}

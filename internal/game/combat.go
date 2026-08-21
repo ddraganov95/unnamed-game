@@ -91,7 +91,7 @@ func CreateProjectile(attacker Attacker, attack Attack) Projectile {
 		Attack:    &attack,
 		IsEnemy:   attacker.IsEnemy(),
 		Speed: Speed{MaxMovementSpeed: attacker.GetProjectileSpeed(),
-			CurrentMovementSpeed: attacker.GetProjectileSpeed()},
+			CurrentMovementSpeed: 0},
 	}
 }
 func (arrow *Arrow) GetSymbol() rune {
@@ -174,11 +174,13 @@ func CreateSpell(attacker Attacker, attack *Attack) GameObject {
 	}
 }
 func (projectile *Projectile) Update(game *Game) {
-	projectile.CurrentMovementSpeed--
+	fmt.Printf("Projectile %s tried to move with %v speed\n", projectile.GetEntityID(), projectile.CurrentMovementSpeed)
 	if projectile.CurrentMovementSpeed > 0 {
+		projectile.CurrentMovementSpeed--
 		return
 	}
-
+	fmt.Printf("Projectile %s actually moved!\n", projectile.GetEntityID())
+	projectile.ResetMovementSpeed()
 	projectile.Attack.Range--
 	//Check Range
 	if projectile.Attack.Range <= 0 {

@@ -125,6 +125,7 @@ func (level *Level) InitializeSpawnPoints() {
 	level.EnemySpawnPoints = availablePositions[desiredCount:]
 }
 func NewLevel(game *Game) {
+	fmt.Println("Entering level gen...")
 	level := PrepareLevel()
 	level.InitializeField()
 	level.InitializeWalls()
@@ -134,9 +135,12 @@ func NewLevel(game *Game) {
 	for _, player := range game.Players {
 		game.SpawnPlayer(player)
 		player.HealToFull()
+		player.LevelsCompleted++
 	}
+	fmt.Println("Players Spawned...")
 	rules := GetSpawnRulesForLevel(game.GetAveragePlayerLevel())
 	level.SpawnEnemies(rules)
+	fmt.Println("Finished level gen...")
 
 }
 func (level *Level) PutEntityAtPosition(entity Positionable, pos Position) bool {

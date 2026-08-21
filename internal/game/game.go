@@ -16,7 +16,7 @@ type Game struct {
 	InputChan   chan PlayerInput
 	ChatHistory []string
 	Players     []*Player
-	mu          sync.Mutex
+	Mu          sync.Mutex
 	Running     bool
 }
 
@@ -30,23 +30,22 @@ func InitializeGame() *Game {
 	InitAttacks()
 	InitSpawnRules()
 	InitInputChan(game)
+	NewLevel(game)
 	return game
 }
 func StartGame(game *Game) {
-
-	NewLevel(game)
 
 	ticker := time.NewTicker(30 * time.Millisecond)
 	defer ticker.Stop()
 
 	for game.Running {
 		<-ticker.C
-
+		game.Mu.Lock()
 		//Update positions, logic, inputs
 		UpdateGame(game, game.InputChan)
 
 		//Send rendered frames to every connected player
-		game.mu.Lock()
+
 		for _, player := range game.Players {
 			// Make sure DrawLevelForPlayer returns a string representation of the screen
 			renderedFrame := game.DrawLevelForPlayer(game.Level, player)
@@ -57,7 +56,7 @@ func StartGame(game *Game) {
 			default:
 			}
 		}
-		game.mu.Unlock()
+		game.Mu.Unlock()
 	}
 }
 func UpdateGame(game *Game, inputChan chan PlayerInput) {
@@ -99,8 +98,6 @@ func (game *Game) DrawLevelForPlayer(level Level, player *Player) string {
 	return game.FlushFrame()
 }
 func (game *Game) SpawnPlayer(player *Player) {
-	game.mu.Lock()
-	defer game.mu.Unlock()
 	//Check if the player is already in the slice so level transitions don't duplicate them
 	alreadyExists := false
 	for _, p := range game.Players {
@@ -225,7 +222,7 @@ func (game *Game) FlushFrame() string {
 }
 func (game *Game) DrawPlayerHUD(player *Player) {
 	// Draw personal player stats at the top of the middle section
-	hudText := fmt.Sprintf(" %c%d | %c%v | %c%d//%d | %c%d",
+	hudText := fmt.Sprintf(" %c%d | %c%v | %c%d/%d | %c%d",
 		SymbolHitPoints, player.CurrentHealth, SymbolCurrentAttack, player.GetEquippedAttack().String(), SymbolCurrentExperience, player.ExperienceVal, GetXpRequiredForNextLevel(player.Level), SymbolCurrentLevel, player.Level)
 	gameStartCol := MaxMessageLength + 3
 	for col, ch := range hudText {
@@ -265,9 +262,8 @@ func InitInputChan(game *Game) {
 
 }
 func (game *Game) RemovePlayer(playerID string) {
-	game.mu.Lock()
-	defer game.mu.Unlock()
-
+	game.Mu.Lock()
+	defer game.Mu.Unlock()
 	// Remove entity from the level safely
 	if player, exists := game.Level.Entities[playerID]; exists {
 		game.Level.RemoveEntity(player)
@@ -284,4 +280,12 @@ func (game *Game) RemovePlayer(playerID string) {
 	}
 
 	fmt.Printf("Cleaned up player %s from game state.\n", playerID)
+}
+func (game *Game) GetPlayerByID(id string) (*Player, bool) {
+	if obj, exists := game.Level.Entities[id]; exists {
+		if player, ok := obj.(*Player); ok {
+			return player, true
+		}
+	}
+	return nil, false
 }

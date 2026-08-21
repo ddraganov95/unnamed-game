@@ -52,14 +52,14 @@ const (
 // Combat Constants
 const (
 	EnemyDefaultAggroRange             = 35
-	EnemyDefaultMovementSpeed          = 10
+	EnemyDefaultMovementSpeed          = 25
 	EnemyDefaultAttackSpeed            = 15
 	EnemyDefaultExperience             = 10
 	ArcherDefaultExperience            = EnemyDefaultExperience * 3
 	GoblinDefaultExperience            = EnemyDefaultExperience
 	PlayerLevelOneExperience           = 10
 	PlayerLevelXpRequirementMultiplier = 1.1
-	EnemyDefaultAttackSpeedRanged      = 7
+	EnemyDefaultAttackSpeedRanged      = 100
 	PlayerDamageReductionPercent       = 50
 	EnemyDefaultDamageMultipier        = 100
 	PlayerDefaultDamageMultipier       = 100

@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"unnamed-game/internal/game"
 
-	"github.com/gorilla/websocket"
+	"unnamed-game/internal/websocket"
 )
 
 func main() {
@@ -14,23 +13,12 @@ func main() {
 	fileServer := http.FileServer(http.Dir("./web"))
 	http.Handle("/", fileServer)
 
-	fmt.Println("Hello To Unnamed RPG Game")
+	fmt.Println("Hello To Unnamed RPG Game Server")
 
-	// Initialize the chat channel and catch the game instance pointer
-	globalChat := make(chan string, game.MaxChatHistory)
-	defer close(globalChat)
-	gameInstance := game.NewGame(globalChat)
-	// Create your Server instance with the game and upgrader config
-	srv := &Server{
-		Game: gameInstance,
-		Upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return true // Allow local connections for development
-			},
-		},
-	}
+	// Initialize the server container
+	srv := websocket.NewServer()
 
-	//Hook up the method using your server instance (srv)
+	// Register WebSocket route
 	http.HandleFunc("/ws", srv.HandleWebSocket)
 
 	port := ":8080"
