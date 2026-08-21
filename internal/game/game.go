@@ -3,11 +3,9 @@ package game
 import (
 	"fmt"
 	"log"
-	"os"
 	"strings"
+	"sync"
 	"time"
-
-	"golang.org/x/term"
 )
 
 type Game struct {
@@ -18,6 +16,7 @@ type Game struct {
 	InputChan   chan PlayerInput
 	ChatHistory []string
 	Players     []*Player
+	mu          sync.Mutex
 	Running     bool
 }
 
@@ -33,36 +32,33 @@ func InitializeGame() *Game {
 	InitInputChan(game)
 	return game
 }
-func StartGame(game *Game, inputChan chan PlayerInput) {
-	//Game should be started after initializing with PrepareGame function. This function will start the game loop and handle player input.
-	fmt.Println("Game Starting...")
-	// Set terminal to raw mode to capture input without echoing (should be done in PrepareGame function)
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-	if err != nil {
-		panic(err)
-	}
-	defer term.Restore(int(os.Stdin.Fd()), oldState) // Restore terminal state on exit
+func StartGame(game *Game) {
 
-	defer close(inputChan)
-
-	fmt.Print("Spawning Player...\r\n")
-	player := NewPlayer("Drago") // Create a new player with ID "Drago"
-	game.Players = append(game.Players, player)
-	go HandlePlayerInputChannel(game, player, inputChan) // Start the input handler in a separate goroutine
 	NewLevel(game)
-	fmt.Print("Game Started!\r\n")
-	//Main game loop should tick at a certain interval, for now we will just use a ticker to tick every 30 milliseconds.
+
 	ticker := time.NewTicker(30 * time.Millisecond)
 	defer ticker.Stop()
-	fmt.Print("Expecting Input...\r\n")
-	//main game loop
 
 	for game.Running {
 		<-ticker.C
-		UpdateGame(game, inputChan)                 // Update game state based on player input
-		game.DrawLevelForPlayer(game.Level, player) // Render level
-	}
 
+		//Update positions, logic, inputs
+		UpdateGame(game, game.InputChan)
+
+		//Send rendered frames to every connected player
+		game.mu.Lock()
+		for _, player := range game.Players {
+			// Make sure DrawLevelForPlayer returns a string representation of the screen
+			renderedFrame := game.DrawLevelForPlayer(game.Level, player)
+
+			// Non-blocking send so a lagging browser tab doesn't freeze the entire game loop
+			select {
+			case player.DisplayChan <- renderedFrame:
+			default:
+			}
+		}
+		game.mu.Unlock()
+	}
 }
 func UpdateGame(game *Game, inputChan chan PlayerInput) {
 	//Drain input channel and update player key queues
@@ -85,8 +81,8 @@ inputLoop:
 	game.Level.Update(game) //Check win/loss conditions
 }
 
-func (game *Game) DrawLevelForPlayer(level Level, player *Player) {
-	//Reset the canvas
+func (game *Game) DrawLevelForPlayer(level Level, player *Player) string {
+	//Reset the frame
 	game.ClearFrame()
 	//Draw Logs
 	game.DrawLogsPanel()
@@ -99,10 +95,24 @@ func (game *Game) DrawLevelForPlayer(level Level, player *Player) {
 	if player != nil {
 		game.DrawPlayerHUD(player)
 	}
-	//Flush the final composed frame to the terminal
-	game.FlushFrame()
+	//Return the composed frame string to the game loop
+	return game.FlushFrame()
 }
 func (game *Game) SpawnPlayer(player *Player) {
+	game.mu.Lock()
+	defer game.mu.Unlock()
+	//Check if the player is already in the slice so level transitions don't duplicate them
+	alreadyExists := false
+	for _, p := range game.Players {
+		if p.GetID() == player.GetID() {
+			alreadyExists = true
+			break
+		}
+	}
+	if !alreadyExists {
+		game.Players = append(game.Players, player)
+		log.Printf("Successfully registered player %s", player.GetID())
+	}
 	pos, available := game.Level.GetSpawnPoint()
 	if !available {
 		log.Println("No available spawn points found!")
@@ -204,15 +214,14 @@ func (game *Game) DrawGlobalChatPanel(level Level, player *Player) {
 		}
 	}
 }
-func (game *Game) FlushFrame() {
+func (game *Game) FlushFrame() string {
 	var sb strings.Builder
-	//sb.WriteString("\033[2J\033[H")
-	sb.WriteString("\033[H")
+	sb.WriteString("\033[H") // Reset cursor to top-left for xterm.js
 	for _, row := range game.Frame {
 		sb.WriteString(string(row))
 		sb.WriteString("\r\n")
 	}
-	fmt.Print(sb.String())
+	return sb.String()
 }
 func (game *Game) DrawPlayerHUD(player *Player) {
 	// Draw personal player stats at the top of the middle section
@@ -245,11 +254,34 @@ func UpdateMap[T any](m map[string]T, game *Game) {
 }
 func NewGame(globalChat chan string) *Game {
 	game := InitializeGame()
-	input := InitInputChan(game)
+	InitInputChan(game)
 	game.GlobalChat = globalChat
-	StartGame(game, input) // Start the game loop
+	go StartGame(game) // Start the game loop
 	return game
 }
-func InitInputChan(game *Game) chan PlayerInput {
-	return make(chan PlayerInput, InputBufferPerPlayer*MaxPlayerCount)
+func InitInputChan(game *Game) {
+	playerInput := make(chan PlayerInput, InputBufferPerPlayer*MaxPlayerCount)
+	game.InputChan = playerInput
+
+}
+func (game *Game) RemovePlayer(playerID string) {
+	game.mu.Lock()
+	defer game.mu.Unlock()
+
+	// Remove entity from the level safely
+	if player, exists := game.Level.Entities[playerID]; exists {
+		game.Level.RemoveEntity(player)
+		delete(game.Level.Entities, playerID) // If it's a map
+	}
+
+	// Find and remove the player from the Players slice
+	for i, p := range game.Players {
+		if p.GetID() == playerID {
+			// Go slice removal pattern: combine elements before `i` with elements after `i`
+			game.Players = append(game.Players[:i], game.Players[i+1:]...)
+			break
+		}
+	}
+
+	fmt.Printf("Cleaned up player %s from game state.\n", playerID)
 }

@@ -55,4 +55,5 @@ type GenericEnemy interface {
 	ResetAttackSpeed()
 	SetDirection(Direction)
 	DistributeXp(game *Game)
+	CheckDeath(game *Game)
 }

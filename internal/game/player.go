@@ -1,6 +1,8 @@
 package game
 
-import "math"
+import (
+	"math"
+)
 
 type Player struct {
 	Entity
@@ -9,6 +11,8 @@ type Player struct {
 	Direction
 	KeyBindings        map[rune]func(g *Game)
 	TypingKeyBindings  map[rune]func(g *Game)
+	DisplayChan        chan string
+	OnQuit             func()
 	KeyQueue           []rune
 	UnlockedAttacks    []Attack
 	LastDamageRecieved Damage
@@ -112,11 +116,13 @@ func NewPlayer(id string) *Player {
 		Direction:      Direction{X: 0, Y: 0},
 		EquippedAttack: AttackBasic,
 		PlayerState:    StatePlaying,
+		DisplayChan:    make(chan string, 100),
 	}
 	player.Experience = Experience{Level: 1, ExperienceVal: 0}
 	player.UnlockAttacks()
 	player.InitKeybindings()
 	player.InitTypingKeybindings()
+
 	return player
 }
 func (player *Player) Attack(game *Game) {

@@ -109,12 +109,14 @@ func (archer *Archer) IsBlocking() bool {
 func (goblin *Goblin) TakeDamage(damage Damage, game *Game) {
 	goblin.CurrentHealth -= damage.Value
 	goblin.LastDamageRecieved = damage
-	game.CreateLog("%s %s hits %s for %d damage", LogInfo, damage.EntityID, goblin.GetID(), damage.Value)
+	//game.CreateLog("%s %s hits %s for %d damage", LogInfo, damage.EntityID, goblin.GetID(), damage.Value)
+	goblin.CheckDeath(game)
 }
 func (archer *Archer) TakeDamage(damage Damage, game *Game) {
 	archer.CurrentHealth -= damage.Value
 	archer.LastDamageRecieved = damage
 	game.CreateLog("%s %s say: STOP HITTING ME!!!!", LogInfo, archer.GetID())
+	archer.CheckDeath(game)
 }
 func (enemy *Enemy) DistributeXp(game *Game) {
 	game.DistributeXp(enemy.ExperienceVal)
@@ -221,12 +223,7 @@ func (enemy *Enemy) GetProjectileSpeed() int {
 	return ProjectileDefaultTravelSpeed
 }
 func UpdateEnemy(game *Game, enemy GenericEnemy) {
-	if !enemy.IsAlive() {
-		game.CreateLog("%s %s killed %s", LogSuccess, enemy.GetLastDamageTakenFrom(), enemy.GetID())
-		enemy.DistributeXp(game)
-		game.Level.RemoveEntity(enemy)
-		return
-	}
+	enemy.CheckDeath(game)
 
 	player, playerExist := GetPlayerInRange(enemy.GetAggroRange(), enemy, game)
 	if !playerExist {
@@ -359,4 +356,11 @@ func CalculateGoblinsPerLevel(playerLevel int) int {
 }
 func CalculateArchersPerLevel(playerLevel int) int {
 	return 1 + playerLevel/4
+}
+func (enemy *Enemy) CheckDeath(game *Game) {
+	if !enemy.IsAlive() {
+		game.CreateLog("%s %s killed %s", LogSuccess, enemy.GetLastDamageTakenFrom(), enemy.GetID())
+		enemy.DistributeXp(game)
+		game.Level.RemoveEntity(enemy)
+	}
 }

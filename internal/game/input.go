@@ -48,7 +48,9 @@ func (player *Player) InitTypingKeybindings() {
 	}
 }
 func (player *Player) QuitGame(game *Game) {
-	game.Running = false
+	if player.OnQuit != nil {
+		player.OnQuit() // Triggers whatever hook the network layer attached
+	}
 	fmt.Print("Quitting Game...\r\n")
 }
 func (player *Player) ChangeTypeState(game *Game) {
