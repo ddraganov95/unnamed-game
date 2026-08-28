@@ -9,77 +9,79 @@ import (
 )
 
 type Game struct {
-	Level       Level
-	Events      []Event
-	Frame       [][]rune
-	GlobalChat  chan string
-	InputChan   chan PlayerInput
-	ChatHistory []string
-	Players     []*Player
-	Mu          sync.Mutex
-	Running     bool
+	Level           Level
+	Events          []Event
+	Frame           [][]rune
+	GlobalChat      chan string
+	EventChan       chan GameEvent   //Channel so server sends info to the game
+	ServerEventChan chan ServerEvent //Channel so that game can send info to the server
+	ChatHistory     []string
+	Players         []*Player
+	Mu              sync.RWMutex
+	State           GameState
+	EmptyMinutes    int
 }
+type GameState int
+
+const (
+	StateGamePlaying GameState = iota
+	StateGameOver
+	StateGameIntermission
+)
 
 func InitializeGame() *Game {
 	//creates an empty game state and initializes the game. This function should be called before StartGame.
 	fmt.Print("Preparing Game...\r\n")
 	game := &Game{
-		Running: true,
+		State: StateGamePlaying,
 	}
 	game.InitFrame()
 	InitAttacks()
 	InitSpawnRules()
-	InitInputChan(game)
+	InitEventChan(game)
 	NewLevel(game)
 	return game
 }
 func StartGame(game *Game) {
-
 	ticker := time.NewTicker(30 * time.Millisecond)
 	defer ticker.Stop()
-
-	for game.Running {
+	log.Println("[DEBUG] Start Game")
+	for {
+		//log.Println("[DEBUG] game loop start")
 		<-ticker.C
 		game.Mu.Lock()
-		//Update positions, logic, inputs
-		UpdateGame(game, game.InputChan)
-
-		//Send rendered frames to every connected player
-
-		for _, player := range game.Players {
-			// Make sure DrawLevelForPlayer returns a string representation of the screen
-			renderedFrame := game.DrawLevelForPlayer(game.Level, player)
-
-			// Non-blocking send so a lagging browser tab doesn't freeze the entire game loop
+		game.ProcessInputs()
+		game.PollGlobalChat()
+		for _, player := range game.GetActivePlayers() {
+			player.Update(game)
+		}
+		if game.State == StateGamePlaying {
+			UpdateGame(game, game.EventChan)
+		}
+		game.Mu.Unlock()
+		//log.Println("[DEBUG] game updated")
+		for _, player := range game.GetActivePlayers() {
+			var renderedFrame string
+			switch game.State {
+			case StateGamePlaying:
+				renderedFrame = game.DrawLevelForPlayer(game.Level, player)
+			case StateGameIntermission:
+				renderedFrame = game.DrawLevelIntermissionForPlayer(game.Level, player)
+			case StateGameOver:
+				renderedFrame = game.DrawGameOverForPlayer(game.Level, player)
+			}
 			select {
 			case player.DisplayChan <- renderedFrame:
 			default:
 			}
 		}
-		game.Mu.Unlock()
 	}
 }
-func UpdateGame(game *Game, inputChan chan PlayerInput) {
-	//Drain input channel and update player key queues
-	//Only players can have inputs and their inputs are stored in the key queue. The game loop will process the key queue and call the appropriate functions.
-	//PlayerIds are unique identifiers for the players. No other entity can have the same id as a player, even other players.
-inputLoop:
-	for {
-		select {
-		case input := <-inputChan:
-			if reciever, ok := game.Level.Entities[input.PlayerID].(InputReceiver); ok {
-				reciever.EnqueueKey(input.Key)
-			}
-		default:
-			break inputLoop
-		}
-	}
+func UpdateGame(game *Game, eventChan chan GameEvent) {
 	UpdateMap(game.Level.Entities, game)
 	UpdateMap(game.Level.Effects, game)
-	game.PollGlobalChat()   //Get Chat Log from global channel.
 	game.Level.Update(game) //Check win/loss conditions
 }
-
 func (game *Game) DrawLevelForPlayer(level Level, player *Player) string {
 	//Reset the frame
 	game.ClearFrame()
@@ -97,6 +99,48 @@ func (game *Game) DrawLevelForPlayer(level Level, player *Player) string {
 	//Return the composed frame string to the game loop
 	return game.FlushFrame()
 }
+func (game *Game) DrawSummaryScreenForPlayer(level Level, player *Player, summaryLines []string) string {
+	game.ClearFrame()
+	game.DrawLogsPanel()
+	game.DrawGlobalChatPanel(level, player)
+
+	startRow := 4
+	startCol := MaxMessageLength + 4
+
+	for rIdx, line := range summaryLines {
+		targetRow := startRow + rIdx
+		if targetRow >= MaxScreenHeight {
+			break
+		}
+		for cIdx, ch := range line {
+			targetCol := startCol + cIdx
+			if targetCol < MaxScreenWidth {
+				game.Frame[targetRow][targetCol] = ch
+			}
+		}
+	}
+
+	if player != nil {
+		game.DrawPlayerHUD(player)
+	}
+
+	return game.FlushFrame()
+}
+func (game *Game) DrawLevelIntermissionForPlayer(level Level, player *Player) string {
+	var summary PlayerSessionSummary
+	if player != nil {
+		summary = player.GenerateSummary()
+	}
+	return game.DrawSummaryScreenForPlayer(level, player, GetSummaryLines(summary))
+}
+
+func (game *Game) DrawGameOverForPlayer(level Level, player *Player) string {
+	var summary PlayerSessionSummary
+	if player != nil {
+		summary = player.GenerateSummary()
+	}
+	return game.DrawSummaryScreenForPlayer(level, player, GetGameOverSummaryLines(summary))
+}
 func (game *Game) SpawnPlayer(player *Player) {
 	//Check if the player is already in the slice so level transitions don't duplicate them
 	alreadyExists := false
@@ -108,7 +152,7 @@ func (game *Game) SpawnPlayer(player *Player) {
 	}
 	if !alreadyExists {
 		game.Players = append(game.Players, player)
-		log.Printf("Successfully registered player %s", player.GetID())
+		log.Printf("Successfully spawned player %s", player.GetID())
 	}
 	pos, available := game.Level.GetSpawnPoint()
 	if !available {
@@ -213,7 +257,7 @@ func (game *Game) DrawGlobalChatPanel(level Level, player *Player) {
 }
 func (game *Game) FlushFrame() string {
 	var sb strings.Builder
-	sb.WriteString("\033[H") // Reset cursor to top-left for xterm.js
+	sb.WriteString("\033[H")
 	for _, row := range game.Frame {
 		sb.WriteString(string(row))
 		sb.WriteString("\r\n")
@@ -251,41 +295,93 @@ func UpdateMap[T any](m map[string]T, game *Game) {
 }
 func NewGame(globalChat chan string) *Game {
 	game := InitializeGame()
-	InitInputChan(game)
 	game.GlobalChat = globalChat
-	go StartGame(game) // Start the game loop
+	go StartGame(game)       // Start the game loop
+	go HandleEmptyGame(game) //Ticks ever 1 min to see if theres activity.
 	return game
 }
-func InitInputChan(game *Game) {
-	playerInput := make(chan PlayerInput, InputBufferPerPlayer*MaxPlayerCount)
-	game.InputChan = playerInput
+func InitEventChan(game *Game) {
+	evntChan := make(chan GameEvent, InputBufferPerPlayer*MaxPlayerCount)
+	game.EventChan = evntChan
 
+	serverEvntChan := make(chan ServerEvent, MaxPlayerCount)
+	game.ServerEventChan = serverEvntChan
 }
-func (game *Game) RemovePlayer(playerID string) {
-	game.Mu.Lock()
-	defer game.Mu.Unlock()
-	// Remove entity from the level safely
-	if player, exists := game.Level.Entities[playerID]; exists {
-		game.Level.RemoveEntity(player)
-		delete(game.Level.Entities, playerID) // If it's a map
-	}
-
-	// Find and remove the player from the Players slice
-	for i, p := range game.Players {
+func (game *Game) GetPlayerByID(playerID string) (*Player, bool) {
+	for _, p := range game.Players {
 		if p.GetID() == playerID {
-			// Go slice removal pattern: combine elements before `i` with elements after `i`
-			game.Players = append(game.Players[:i], game.Players[i+1:]...)
-			break
-		}
-	}
-
-	fmt.Printf("Cleaned up player %s from game state.\n", playerID)
-}
-func (game *Game) GetPlayerByID(id string) (*Player, bool) {
-	if obj, exists := game.Level.Entities[id]; exists {
-		if player, ok := obj.(*Player); ok {
-			return player, true
+			return p, true
 		}
 	}
 	return nil, false
+}
+func (game *Game) ValidateSpace() error {
+	if len(game.GetActivePlayers()) >= MaxPlayerCount {
+		return fmt.Errorf("game is full")
+	}
+	return nil
+}
+func (g *Game) GetActivePlayers() []*Player {
+	var active []*Player
+	for _, p := range g.Players {
+		if p.PlayerState != StateDisconnected {
+			active = append(active, p)
+		}
+	}
+	return active
+}
+func (g *Game) GetActivePlayerById(playerId string) (*Player, bool) {
+	for _, p := range g.Players {
+		if p.PlayerState != StateDisconnected && p.GetID() == playerId {
+			return p, true
+		}
+	}
+	return nil, false
+}
+func (game *Game) HandlePlayerConnect(playerID string) error {
+	log.Println("[DEBUG] Player Connecting")
+	if player, exists := game.GetPlayerByID(playerID); exists {
+		log.Println("[DEBUG] Existing Player Connecting")
+		player.PlayerState = StatePlaying
+		if !game.Level.PutEntityAtPosition(player, player.GetPosition()) {
+			log.Println("Failed to place player: Spawn point was blocked.")
+		}
+	} else {
+		log.Println("[DEBUG] New Player Connecting")
+		player := NewPlayer(playerID)
+		game.SpawnPlayer(player)
+	}
+	return nil
+}
+func (game *Game) HandlePlayerDisconnect(playerID string) {
+	log.Println("[DEBUG] Player Disconnecting")
+	if player, exists := game.GetActivePlayerById(playerID); exists {
+		player.PlayerState = StateDisconnected
+		game.Level.RemoveEntity(player)
+		game.ServerEventChan <- ServerEvent{PlayerID: playerID, Type: EventTypeDisconnect}
+		log.Printf("[DEBUG] Player %s Disconnected", playerID)
+	}
+}
+func (game *Game) Destroy() {
+	game.Mu.Lock()
+	defer game.Mu.Unlock()
+
+	for _, p := range game.Players {
+		p.PlayerState = StateDisconnected
+		close(p.DisplayChan)
+	}
+	close(game.EventChan)
+	// Signal master server to remove this game from its active map
+	game.ServerEventChan <- ServerEvent{Type: EventTypeIdleCheck}
+}
+func HandleEmptyGame(game *Game) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		select {
+		case game.EventChan <- GameEvent{Type: EventTypeIdleCheck}:
+		default:
+		}
+	}
 }

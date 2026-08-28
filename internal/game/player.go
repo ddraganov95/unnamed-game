@@ -14,7 +14,6 @@ type Player struct {
 	KeyBindings        map[rune]func(g *Game)
 	TypingKeyBindings  map[rune]func(g *Game)
 	DisplayChan        chan string
-	OnQuit             func()
 	KeyQueue           []rune
 	UnlockedAttacks    []Attack
 	LastDamageRecieved Damage
@@ -27,6 +26,7 @@ type PlayerState int
 const (
 	StatePlaying PlayerState = iota
 	StateTyping
+	StateDisconnected
 )
 
 func (s PlayerState) String() string {
@@ -35,6 +35,8 @@ func (s PlayerState) String() string {
 		return "Playing"
 	case StateTyping:
 		return "Typing"
+	case StateDisconnected:
+		return "Disconnected"
 	default:
 		return "Unknown"
 	}
@@ -84,6 +86,9 @@ func (player *Player) MoveRight(game *Game) {
 	game.Level.MoveEntity(player, nextPosition)
 }
 func (player *Player) Update(game *Game) {
+	if player.PlayerState == StateDisconnected {
+		return
+	}
 	keyPresses := player.KeyQueue
 	if player.PlayerState == StatePlaying {
 		for _, key := range keyPresses {
@@ -156,6 +161,9 @@ func (player *Player) IsBlocking() bool {
 func (player *Player) TakeDamage(damage Damage, game *Game) {
 	damageToTake := int((damage.Value * (100 - PlayerDamageReductionPercent)) / 100)
 	player.CurrentHealth -= damageToTake
+	if player.CurrentHealth < 0 {
+		player.CurrentHealth = 0
+	}
 	player.LastDamageRecieved = damage
 	player.DamageTaken += damageToTake
 	game.CreateLog("%s %s hits %s for %d damage", LogInfo, damage.EntityID, player.GetID(), damageToTake)

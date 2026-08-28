@@ -21,9 +21,6 @@ type GameObject interface {
 	GetID() string
 	GetPosition() Position
 }
-type InputReceiver interface {
-	EnqueueKey(r rune)
-}
 type Blocker interface {
 	IsBlocking() bool
 	IsEnemy() bool

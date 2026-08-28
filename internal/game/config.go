@@ -99,5 +99,6 @@ const (
 
 // Game Constants
 const (
-	InputBufferPerPlayer = 10
+	InputBufferPerPlayer     = 10
+	StopGameAfterIdleMinutes = 2
 )

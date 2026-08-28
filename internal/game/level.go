@@ -31,7 +31,14 @@ type LevelConfig struct {
 
 func (level *Level) GetEntityAt(pos Position) ([]GameObject, bool) {
 	entities, exists := level.posEntities[pos]
-	return entities, exists && len(entities) > 0
+	var activeEntities []GameObject
+	for _, entity := range entities {
+		activeEntities = append(activeEntities, entity)
+	}
+	if len(activeEntities) == 0 {
+		return nil, false
+	}
+	return activeEntities, exists
 }
 func (level *Level) GetBlockerAt(pos Position) (Blocker, bool) {
 	if entities, found := level.GetEntityAt(pos); found {
@@ -131,8 +138,12 @@ func NewLevel(game *Game) {
 	level.InitializeWalls()
 	level.InitializeZoneObjects()
 	level.InitializeSpawnPoints()
+	game.Events = nil
 	game.Level = *level
-	for _, player := range game.Players {
+	for _, player := range game.GetActivePlayers() {
+		if !player.IsAlive() {
+			continue
+		}
 		game.SpawnPlayer(player)
 		player.HealToFull()
 		player.LevelsCompleted++
@@ -249,33 +260,45 @@ func (level *Level) InitializeZone(zone *Zone) {
 	}
 }
 func (level *Level) Update(game *Game) {
-	alive := true // Just for debug obv
-	for _, player := range game.Players {
+	if game.State != StateGamePlaying {
+		return
+	}
+	activePlayers := game.GetActivePlayers()
+	if len(activePlayers) == 0 {
+		return //If everyone refreshed or disconnected, don't trigger a fake "Game Over"
+	}
+	//Check if all players died
+	alivePlayers := false
+	for _, player := range activePlayers {
 		if player.IsAlive() {
-			alive = true
+			alivePlayers = true
 			break
 		}
 	}
-	if !alive {
-		game.Running = false
+	if !alivePlayers {
 		game.CreateLog("%s Everyone Died", LogError)
 		game.CreateLog("%s Game Over!", LogError)
+		game.State = StateGameOver
+		return
 	}
-	alive = false
+
+	//Check if all enemies are dead -> Enter Intermission instead of instantly loading next level
+	aliveEnemies := false
 	for _, enemy := range game.Level.Entities {
 		if genericEnemy, ok := enemy.(GenericEnemy); ok {
 			if genericEnemy.IsAlive() {
-				alive = true
+				aliveEnemies = true
 				break
 			}
 		}
 	}
-	if !alive {
+	if !aliveEnemies {
 		game.CreateLog("%s Enemies Are All dead", LogSuccess)
-		game.CreateLog("%s New enemies are coming...", LogSuccess)
-		NewLevel(game)
+		for _, player := range game.GetActivePlayers() {
+			player.LevelsCompleted++
+		}
+		game.State = StateGameIntermission
 	}
-
 }
 func (level *Level) GetExitablePositions(allPositions []Position) []Position {
 	var availablePositions []Position
@@ -406,19 +429,19 @@ func IsPositionInBounds(pos Position) bool {
 		pos.Y < LevelSizeY
 }
 func (game *Game) DistributeXp(xp int) {
-	for _, player := range game.Players {
+	for _, player := range game.GetActivePlayers() {
 		player.GainXp(xp)
 	}
 }
 func (game *Game) GetAveragePlayerLevel() int {
-	if len(game.Players) == 0 {
+	if len(game.GetActivePlayers()) == 0 {
 		return 1
 	}
 	totalLevel := 0
-	for _, player := range game.Players {
+	for _, player := range game.GetActivePlayers() {
 		totalLevel += player.Level
 	}
-	return totalLevel / len(game.Players)
+	return totalLevel / len(game.GetActivePlayers())
 }
 func GetSpawnRulesForLevel(playerLevel int) []SpawnRule {
 	var validRules []SpawnRule

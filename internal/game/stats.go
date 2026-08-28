@@ -57,16 +57,44 @@ func (player *Player) GenerateSummary() PlayerSessionSummary {
 		DamageTaken:     player.DamageTaken,
 	}
 }
-func (summary PlayerSessionSummary) Print() {
-	fmt.Println("\n==============================")
-	fmt.Printf("   GAME OVER / SESSION SUMMARY\n")
-	fmt.Println("==============================")
-	fmt.Printf(" Player ID:        %s\n", summary.PlayerID)
-	fmt.Printf(" Playtime:         %v\n", summary.SessionDuration.Round(time.Second))
-	fmt.Printf(" XP Gained:        %d\n", summary.XPGained)
-	fmt.Printf(" Enemies Killed:   %d\n", summary.EnemiesKilled)
-	fmt.Printf(" Levels Completed: %d\n", summary.LevelsCompleted)
-	fmt.Printf(" Damage Dealt:     %d\n", summary.DamageDealt)
-	fmt.Printf(" Damage Taken:     %d\n", summary.DamageTaken)
-	fmt.Printf("==============================\n")
+func GetSummaryLines(summary PlayerSessionSummary) []string {
+	duration := summary.SessionDuration.Truncate(time.Second)
+	return []string{
+		"+--------------------------------------------------+",
+		"|                  Level Complete                  |",
+		"+--------------------------------------------------+",
+		fmt.Sprintf("| Adventurer:     %-32s |", summary.PlayerID),
+		fmt.Sprintf("| Playtime:       %-32v |", duration),
+		"+--------------------------------------------------+",
+		fmt.Sprintf("| Levels Cleared: %-32d |", summary.LevelsCompleted),
+		fmt.Sprintf("| Enemies Slain:  %-32d |", summary.EnemiesKilled),
+		fmt.Sprintf("| XP Gained:      %-32d |", summary.XPGained),
+		"+--------------------------------------------------+",
+		fmt.Sprintf("| Damage Dealt:   %-32d |", summary.DamageDealt),
+		fmt.Sprintf("| Damage Taken:   %-32d |", summary.DamageTaken),
+		"+--------------------------------------------------+",
+		"|             Press [SPACE] to continue            |",
+		"|              Press [Q] to quit game              |",
+		"+--------------------------------------------------+",
+	}
+}
+func GetGameOverSummaryLines(summary PlayerSessionSummary) []string {
+	duration := summary.SessionDuration.Truncate(time.Second)
+	return []string{
+		"+--------------------------------------------------+",
+		"|                    GAME OVER                     |",
+		"+--------------------------------------------------+",
+		fmt.Sprintf("| Adventurer:     %-32s |", summary.PlayerID),
+		fmt.Sprintf("| Playtime:       %-32v |", duration),
+		"+--------------------------------------------------+",
+		fmt.Sprintf("| Levels Cleared: %-32d |", summary.LevelsCompleted),
+		fmt.Sprintf("| Enemies Slain:  %-32d |", summary.EnemiesKilled),
+		fmt.Sprintf("| XP Gained:      %-32d |", summary.XPGained),
+		"+--------------------------------------------------+",
+		fmt.Sprintf("| Damage Dealt:   %-32d |", summary.DamageDealt),
+		fmt.Sprintf("| Damage Taken:   %-32d |", summary.DamageTaken),
+		"+--------------------------------------------------+",
+		"|             Press [Q] to exit game...            |",
+		"+--------------------------------------------------+",
+	}
 }

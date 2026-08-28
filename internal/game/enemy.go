@@ -260,7 +260,7 @@ func UpdateEnemy(game *Game, enemy GenericEnemy) {
 func GetPlayerInRange(scanRange int, enemy GenericEnemy, game *Game) (*Player, bool) {
 	enemyPos := enemy.GetPosition()
 
-	for _, player := range game.Players {
+	for _, player := range game.GetActivePlayers() {
 		if player == nil {
 			continue
 		}

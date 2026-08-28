@@ -9,8 +9,15 @@
     term.open(document.getElementById('terminal'));
 
     //Connect to Go WebSocket backend
+    // Hardcoded name for testing
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+    const myPlayerName = "HeroOfBulgaria"; 
+
+    //Build the full dynamic URL including the query parameter
+    const wsUrl = `${protocol}//${window.location.host}/ws?name=${encodeURIComponent(myPlayerName)}`;
+
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
         term.writeln("Connected to dungeon server...\r\n");

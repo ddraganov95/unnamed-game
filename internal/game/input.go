@@ -1,28 +1,31 @@
 package game
 
 import (
-	"errors"
 	"fmt"
-	"os"
+	"log"
 )
 
-type PlayerInput struct {
+type EventType int
+
+const (
+	EventTypeKey EventType = iota
+	EventTypeConnect
+	EventTypeDisconnect
+	EventTypeIdleCheck
+)
+
+type GameEvent struct {
+	Type     EventType
 	PlayerID string
 	Key      rune
+	RespChan chan error
+}
+type ServerEvent struct {
+	Type     EventType
+	PlayerID string
+	RespChan chan error
 }
 
-func HandlePlayerInputChannel(game *Game, player *Player, inputChan chan PlayerInput) error {
-	var buf [1]byte
-	for game.Running {
-		_, err := os.Stdin.Read(buf[:])
-		if err != nil {
-			return errors.New("failed to read input")
-		}
-		// Send the pressed key into the channel
-		inputChan <- PlayerInput{PlayerID: player.ID, Key: rune(buf[0])}
-	}
-	return nil
-}
 func (player *Player) EnqueueKey(r rune) {
 	player.KeyQueue = append(player.KeyQueue, r)
 }
@@ -37,6 +40,7 @@ func (player *Player) InitKeybindings() {
 		'q':  player.QuitGame,
 		'e':  player.ChangeEquippedAttack,
 		'\r': player.ChangeTypeState,
+		' ':  player.GetNextLevel,
 	}
 }
 func (player *Player) InitTypingKeybindings() {
@@ -48,8 +52,9 @@ func (player *Player) InitTypingKeybindings() {
 	}
 }
 func (player *Player) QuitGame(game *Game) {
-	if player.OnQuit != nil {
-		player.OnQuit() // Triggers whatever hook the network layer attached
+	game.EventChan <- GameEvent{
+		Type:     EventTypeDisconnect,
+		PlayerID: player.GetID(),
 	}
 	fmt.Print("Quitting Game...\r\n")
 }
@@ -61,6 +66,13 @@ func (player *Player) ChangeTypeState(game *Game) {
 	}
 	player.PlayerState = StateTyping
 }
+func (player *Player) GetNextLevel(game *Game) {
+	log.Println("[DEBUG] Pressed SPACE!")
+	if game.State == StateGameIntermission {
+		NewLevel(game)
+		game.State = StateGamePlaying
+	}
+}
 func (player *Player) RemoveLastByteMessage(game *Game) {
 	if len(player.MessageBuffer) > 0 {
 		player.MessageBuffer = player.MessageBuffer[:len(player.MessageBuffer)-1]
@@ -70,5 +82,41 @@ func (player *Player) SendMessage(game *Game) {
 	if len(player.MessageBuffer) > 0 {
 		game.GlobalChat <- fmt.Sprintf("%s : %s", player.GetID(), player.MessageBuffer)
 		player.MessageBuffer = ""
+	}
+}
+func (game *Game) ProcessInputs() {
+EventLoop:
+	for {
+		select {
+		case event := <-game.EventChan:
+			switch event.Type {
+			case EventTypeConnect:
+				log.Printf("[DEBUG] Conn %s ", event.PlayerID)
+				err := game.HandlePlayerConnect(event.PlayerID)
+				event.RespChan <- err
+			case EventTypeDisconnect:
+				log.Printf("[DEBUG] Disco %s ", event.PlayerID)
+				game.HandlePlayerDisconnect(event.PlayerID)
+			case EventTypeKey:
+				log.Printf("[DEBUG] Reading Input %s %v", event.PlayerID, event.Key)
+				if receiver, ok := game.GetActivePlayerById(event.PlayerID); ok {
+					receiver.EnqueueKey(event.Key)
+				}
+			case EventTypeIdleCheck:
+				if len(game.GetActivePlayers()) == 0 || game.State != StateGamePlaying {
+					game.EmptyMinutes++
+					log.Printf("[DEBUG] Game empty for %d minute(s)", game.EmptyMinutes)
+					if game.EmptyMinutes >= StopGameAfterIdleMinutes {
+						log.Println("[DEBUG] Idle threshold reached via server tick. Shutting down game.")
+						game.Destroy() // Clean up channels and exit loop
+					}
+				} else {
+					game.EmptyMinutes = 0 // Reset when players return
+				}
+			}
+
+		default:
+			break EventLoop
+		}
 	}
 }
