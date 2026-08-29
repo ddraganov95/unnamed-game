@@ -88,7 +88,10 @@ func (game *Game) ProcessInputs() {
 EventLoop:
 	for {
 		select {
-		case event := <-game.EventChan:
+		case event, ok := <-game.EventChan:
+			if !ok {
+				return
+			}
 			switch event.Type {
 			case EventTypeConnect:
 				log.Printf("[DEBUG] Conn %s ", event.PlayerID)
@@ -102,19 +105,7 @@ EventLoop:
 				if receiver, ok := game.GetActivePlayerById(event.PlayerID); ok {
 					receiver.EnqueueKey(event.Key)
 				}
-			case EventTypeIdleCheck:
-				if len(game.GetActivePlayers()) == 0 || game.State != StateGamePlaying {
-					game.EmptyMinutes++
-					log.Printf("[DEBUG] Game empty for %d minute(s)", game.EmptyMinutes)
-					if game.EmptyMinutes >= StopGameAfterIdleMinutes {
-						log.Println("[DEBUG] Idle threshold reached via server tick. Shutting down game.")
-						game.Destroy() // Clean up channels and exit loop
-					}
-				} else {
-					game.EmptyMinutes = 0 // Reset when players return
-				}
 			}
-
 		default:
 			break EventLoop
 		}

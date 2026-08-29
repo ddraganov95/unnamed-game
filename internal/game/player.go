@@ -85,7 +85,9 @@ func (player *Player) MoveRight(game *Game) {
 	}
 	game.Level.MoveEntity(player, nextPosition)
 }
-func (player *Player) Update(game *Game) {
+func (player *Player) UpdatePlayer(game *Game) {
+	//Naming is intentional so it doesn't get Updatable interface and doesnt get updated with all the entities
+	//This is made so taht we can always process player inputs regardless of game state
 	if player.PlayerState == StateDisconnected {
 		return
 	}

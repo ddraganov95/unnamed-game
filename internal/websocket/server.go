@@ -84,7 +84,7 @@ func (server *Server) GetOrCreateGame() *game.Game {
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	log.Println("[DEBUG] GetOrCreateGame: acquired server.mu")
-
+	log.Printf("[DEBUG] %v", server.Game)
 	if server.Game == nil {
 		globalChat := make(chan string, game.MaxChatHistory)
 		server.Game = game.NewGame(globalChat)
@@ -220,7 +220,9 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 				server.DisconnectPlayer(g, event.PlayerID, conn)
 			}
 		case game.EventTypeIdleCheck:
-			//TODO REMOVE FROM GAME LIST
+			log.Println("[DEBUG] Set Game to Nil")
+			server.Game = nil
+			return
 		}
 	}
 }

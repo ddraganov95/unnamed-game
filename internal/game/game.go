@@ -15,6 +15,7 @@ type Game struct {
 	GlobalChat      chan string
 	EventChan       chan GameEvent   //Channel so server sends info to the game
 	ServerEventChan chan ServerEvent //Channel so that game can send info to the server
+	DestroyChan     chan struct{}
 	ChatHistory     []string
 	Players         []*Player
 	Mu              sync.RWMutex
@@ -33,7 +34,8 @@ func InitializeGame() *Game {
 	//creates an empty game state and initializes the game. This function should be called before StartGame.
 	fmt.Print("Preparing Game...\r\n")
 	game := &Game{
-		State: StateGamePlaying,
+		State:       StateGamePlaying,
+		DestroyChan: make(chan struct{}),
 	}
 	game.InitFrame()
 	InitAttacks()
@@ -47,32 +49,37 @@ func StartGame(game *Game) {
 	defer ticker.Stop()
 	log.Println("[DEBUG] Start Game")
 	for {
-		//log.Println("[DEBUG] game loop start")
-		<-ticker.C
-		game.Mu.Lock()
-		game.ProcessInputs()
-		game.PollGlobalChat()
-		for _, player := range game.GetActivePlayers() {
-			player.Update(game)
-		}
-		if game.State == StateGamePlaying {
-			UpdateGame(game, game.EventChan)
-		}
-		game.Mu.Unlock()
-		//log.Println("[DEBUG] game updated")
-		for _, player := range game.GetActivePlayers() {
-			var renderedFrame string
-			switch game.State {
-			case StateGamePlaying:
-				renderedFrame = game.DrawLevelForPlayer(game.Level, player)
-			case StateGameIntermission:
-				renderedFrame = game.DrawLevelIntermissionForPlayer(game.Level, player)
-			case StateGameOver:
-				renderedFrame = game.DrawGameOverForPlayer(game.Level, player)
+		select {
+		case <-game.DestroyChan:
+			log.Println("[DEBUG] StartGame loop terminated.")
+			return
+		case <-ticker.C:
+			//log.Println("[DEBUG] game loop start")
+			game.Mu.Lock()
+			game.ProcessInputs()
+			game.PollGlobalChat()
+			for _, player := range game.GetActivePlayers() {
+				player.UpdatePlayer(game)
 			}
-			select {
-			case player.DisplayChan <- renderedFrame:
-			default:
+			if game.State == StateGamePlaying {
+				UpdateGame(game, game.EventChan)
+			}
+			game.Mu.Unlock()
+			//log.Println("[DEBUG] game updated")
+			for _, player := range game.GetActivePlayers() {
+				var renderedFrame string
+				switch game.State {
+				case StateGamePlaying:
+					renderedFrame = game.DrawLevelForPlayer(game.Level, player)
+				case StateGameIntermission:
+					renderedFrame = game.DrawLevelIntermissionForPlayer(game.Level, player)
+				case StateGameOver:
+					renderedFrame = game.DrawGameOverForPlayer(game.Level, player)
+				}
+				select {
+				case player.DisplayChan <- renderedFrame:
+				default:
+				}
 			}
 		}
 	}
@@ -363,25 +370,59 @@ func (game *Game) HandlePlayerDisconnect(playerID string) {
 	}
 }
 func (game *Game) Destroy() {
-	game.Mu.Lock()
-	defer game.Mu.Unlock()
-
-	for _, p := range game.Players {
-		p.PlayerState = StateDisconnected
-		close(p.DisplayChan)
+	select {
+	case <-game.DestroyChan:
+		return // Already destroyed, exit safely
+	default:
+		close(game.DestroyChan) // Safe to close once
 	}
-	close(game.EventChan)
-	// Signal master server to remove this game from its active map
+
+	players := game.Players
+	if game.EventChan != nil {
+		close(game.EventChan)
+	}
+
+	// Clean up player channels safely outside the lock
+	for _, p := range players {
+		p.PlayerState = StateDisconnected
+		if p.DisplayChan != nil {
+			select {
+			case <-p.DisplayChan:
+			default:
+				close(p.DisplayChan)
+			}
+		}
+	}
+
+	// Signal the server that the game is dead
 	game.ServerEventChan <- ServerEvent{Type: EventTypeIdleCheck}
+	log.Println("[DEBUG] Game instance successfully destroyed and idle check sent.")
 }
 func HandleEmptyGame(game *Game) {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
+	for {
 		select {
-		case game.EventChan <- GameEvent{Type: EventTypeIdleCheck}:
-		default:
+		case <-game.DestroyChan:
+			log.Println("[DEBUG] HandleEmptyGame loop terminated.")
+			return
+		case <-ticker.C:
+			game.Mu.Lock()
+			if len(game.GetActivePlayers()) == 0 || game.State != StateGamePlaying {
+				game.EmptyMinutes++
+				log.Printf("[DEBUG] Game empty for %d minute(s)", game.EmptyMinutes)
+				game.CreateLog("[SERVER] Game ending in %d minute(s)", StopGameAfterIdleMinutes-game.EmptyMinutes)
+				if game.EmptyMinutes >= StopGameAfterIdleMinutes {
+					log.Println("[DEBUG] Idle threshold reached via ticker. Shutting down game.")
+					game.Mu.Unlock()
+					game.Destroy()
+					return
+				}
+			} else {
+				game.EmptyMinutes = 0
+			}
+			game.Mu.Unlock()
 		}
 	}
 }
