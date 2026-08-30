@@ -1,11 +1,13 @@
 package game
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
 	"time"
+	"uuid"
 )
 
 type Game struct {
@@ -21,6 +23,8 @@ type Game struct {
 	Mu              sync.RWMutex
 	State           GameState
 	EmptyMinutes    int
+	LevelNumber     int
+	GameId          uuid.UUID
 }
 type GameState int
 
@@ -62,7 +66,7 @@ func StartGame(game *Game) {
 				player.UpdatePlayer(game)
 			}
 			if game.State == StateGamePlaying {
-				UpdateGame(game, game.EventChan)
+				UpdateGame(game)
 			}
 			game.Mu.Unlock()
 			//log.Println("[DEBUG] game updated")
@@ -84,7 +88,7 @@ func StartGame(game *Game) {
 		}
 	}
 }
-func UpdateGame(game *Game, eventChan chan GameEvent) {
+func UpdateGame(game *Game) {
 	UpdateMap(game.Level.Entities, game)
 	UpdateMap(game.Level.Effects, game)
 	game.Level.Update(game) //Check win/loss conditions
@@ -99,10 +103,10 @@ func (game *Game) DrawLevelForPlayer(level Level, player *Player) string {
 	game.DrawEffects(game.Level)
 	//Draw global chat
 	game.DrawGlobalChatPanel(level, player)
-	//Layer the player-specific UI on top
-	if player != nil {
-		game.DrawPlayerHUD(player)
-	}
+	//Draw the player-specific UI on top
+	game.DrawPlayerHUD(player)
+	//Draw the lower part of the screen
+	game.DrawFooter()
 	//Return the composed frame string to the game loop
 	return game.FlushFrame()
 }
@@ -127,9 +131,8 @@ func (game *Game) DrawSummaryScreenForPlayer(level Level, player *Player, summar
 		}
 	}
 
-	if player != nil {
-		game.DrawPlayerHUD(player)
-	}
+	game.DrawPlayerHUD(player)
+	game.DrawFooter()
 
 	return game.FlushFrame()
 }
@@ -272,6 +275,9 @@ func (game *Game) FlushFrame() string {
 	return sb.String()
 }
 func (game *Game) DrawPlayerHUD(player *Player) {
+	if player == nil {
+		return
+	}
 	// Draw personal player stats at the top of the middle section
 	hudText := fmt.Sprintf(" %c%d | %c%v | %c%d/%d | %c%d",
 		SymbolHitPoints, player.CurrentHealth, SymbolCurrentAttack, player.GetEquippedAttack().String(), SymbolCurrentExperience, player.ExperienceVal, GetXpRequiredForNextLevel(player.Level), SymbolCurrentLevel, player.Level)
@@ -293,6 +299,39 @@ func (game *Game) DrawLogsPanel() {
 		}
 	}
 }
+func (game *Game) DrawFooter() {
+	row1Idx := MaxScreenHeight - 2
+	row2Idx := MaxScreenHeight - 1
+
+	if row1Idx >= 0 && row2Idx < len(game.Frame) {
+		// Clear both footer rows first
+		for col := range game.Frame[row1Idx] {
+			game.Frame[row1Idx][col] = ' '
+			game.Frame[row2Idx][col] = ' '
+		}
+
+		text1 := "Press [C] to copy Game ID"
+		text2 := fmt.Sprintf("Game ID: %s", game.GameId.String())
+
+		// Center and draw Row 1 (Instruction)
+		startCol1 := (MaxScreenWidth - len(text1)) / 2
+		for i, ch := range text1 {
+			target := startCol1 + i
+			if target >= 0 && target < MaxScreenWidth {
+				game.Frame[row1Idx][target] = ch
+			}
+		}
+
+		// Center and draw Row 2 (The ID itself)
+		startCol2 := (MaxScreenWidth - len(text2)) / 2
+		for i, ch := range text2 {
+			target := startCol2 + i
+			if target >= 0 && target < MaxScreenWidth {
+				game.Frame[row2Idx][target] = ch
+			}
+		}
+	}
+}
 func UpdateMap[T any](m map[string]T, game *Game) {
 	for _, item := range m {
 		if updateable, ok := any(item).(Updateable); ok {
@@ -300,9 +339,10 @@ func UpdateMap[T any](m map[string]T, game *Game) {
 		}
 	}
 }
-func NewGame(globalChat chan string) *Game {
+func NewGame(gameId uuid.UUID, globalChat chan string) *Game {
 	game := InitializeGame()
 	game.GlobalChat = globalChat
+	game.GameId = gameId
 	go StartGame(game)       // Start the game loop
 	go HandleEmptyGame(game) //Ticks ever 1 min to see if theres activity.
 	return game
@@ -349,15 +389,22 @@ func (game *Game) HandlePlayerConnect(playerID string) error {
 	log.Println("[DEBUG] Player Connecting")
 	if player, exists := game.GetPlayerByID(playerID); exists {
 		log.Println("[DEBUG] Existing Player Connecting")
-		player.PlayerState = StatePlaying
-		if !game.Level.PutEntityAtPosition(player, player.GetPosition()) {
-			log.Println("Failed to place player: Spawn point was blocked.")
+		//Same level reconnecting try same position
+		if game.LevelNumber-1 == player.LevelsCompleted && !game.Level.PutEntityAtPosition(player, player.GetPosition()) {
+			return errors.New("Failed to place player: Spawn point was blocked.")
+		} else {
+			//Reconnecting after players continued
+			game.SpawnPlayer(player)
 		}
+		player.PlayerState = StatePlaying
 	} else {
 		log.Println("[DEBUG] New Player Connecting")
 		player := NewPlayer(playerID)
+		player.GameID = game.GameId.String()
+		log.Printf("[DEBUG] -------------------New Player Game id: %s", player.GameID)
 		game.SpawnPlayer(player)
 	}
+	game.EmptyMinutes = 0
 	return nil
 }
 func (game *Game) HandlePlayerDisconnect(playerID string) {
@@ -374,32 +421,21 @@ func (game *Game) Destroy() {
 	case <-game.DestroyChan:
 		return // Already destroyed, exit safely
 	default:
-		close(game.DestroyChan) // Safe to close once
+		close(game.DestroyChan) //Safe to close
 	}
-
-	players := game.Players
-	if game.EventChan != nil {
-		close(game.EventChan)
+	dcChan := make(chan error)
+	game.ServerEventChan <- ServerEvent{
+		Type:     EventTypeMassDisconnect,
+		RespChan: dcChan,
 	}
-
-	// Clean up player channels safely outside the lock
-	for _, p := range players {
-		p.PlayerState = StateDisconnected
-		if p.DisplayChan != nil {
-			select {
-			case <-p.DisplayChan:
-			default:
-				close(p.DisplayChan)
-			}
-		}
-	}
+	<-dcChan
 
 	// Signal the server that the game is dead
 	game.ServerEventChan <- ServerEvent{Type: EventTypeIdleCheck}
 	log.Println("[DEBUG] Game instance successfully destroyed and idle check sent.")
 }
 func HandleEmptyGame(game *Game) {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {

@@ -69,7 +69,7 @@ func InitAttacks() {
 			Name:          "Spell",
 			Range:         SpellAttackBaseRange,
 			Execute:       SpellAttack,
-			RequiredLevel: 6,
+			RequiredLevel: 15,
 			Damage:        &Damage{Value: SpellAttackBaseDamage, Type: SpellDamage},
 		},
 	}
@@ -85,13 +85,12 @@ func CreateProjectile(attacker Attacker, attack Attack) Projectile {
 	projID := fmt.Sprintf("%s_proj_%d", attacker.GetID(), time.Now().UnixNano())
 
 	return Projectile{
-		Entity:    CreateEntity(projID, pos),
-		Direction: dir,
-		SenderID:  attacker.GetID(),
-		Attack:    &attack,
-		IsEnemy:   attacker.IsEnemy(),
-		Speed: Speed{MaxMovementSpeed: attacker.GetProjectileSpeed(),
-			CurrentMovementSpeed: 0},
+		Entity:               CreateEntity(projID, pos),
+		Direction:            dir,
+		SenderID:             attacker.GetID(),
+		Attack:               &attack,
+		IsEnemy:              attacker.IsEnemy(),
+		CurrentMovementSpeed: 0,
 	}
 }
 func (arrow *Arrow) GetSymbol() rune {

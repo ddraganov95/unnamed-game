@@ -11,7 +11,9 @@ const (
 	EventTypeKey EventType = iota
 	EventTypeConnect
 	EventTypeDisconnect
+	EventTypeMassDisconnect
 	EventTypeIdleCheck
+	EventTypeCopyGame
 )
 
 type GameEvent struct {
@@ -23,6 +25,7 @@ type GameEvent struct {
 type ServerEvent struct {
 	Type     EventType
 	PlayerID string
+	Value    string
 	RespChan chan error
 }
 
@@ -41,6 +44,7 @@ func (player *Player) InitKeybindings() {
 		'e':  player.ChangeEquippedAttack,
 		'\r': player.ChangeTypeState,
 		' ':  player.GetNextLevel,
+		'c':  player.CopyGameId,
 	}
 }
 func (player *Player) InitTypingKeybindings() {
@@ -58,6 +62,22 @@ func (player *Player) QuitGame(game *Game) {
 	}
 	fmt.Print("Quitting Game...\r\n")
 }
+func (player *Player) GetNextLevel(game *Game) {
+	log.Println("[DEBUG] Pressed c!")
+	if game.State == StateGameIntermission {
+		NewLevel(game)
+		game.EmptyMinutes = 0
+		game.State = StateGamePlaying
+	}
+}
+func (player *Player) CopyGameId(game *Game) {
+	game.ServerEventChan <- ServerEvent{
+		Type:     EventTypeCopyGame,
+		PlayerID: player.GetID(),
+		Value:    player.GameID,
+	}
+	fmt.Print("Game ID copied!\r\n")
+}
 func (player *Player) ChangeTypeState(game *Game) {
 	if player.PlayerState == StateTyping {
 		player.SendMessage(game)
@@ -65,13 +85,6 @@ func (player *Player) ChangeTypeState(game *Game) {
 		return
 	}
 	player.PlayerState = StateTyping
-}
-func (player *Player) GetNextLevel(game *Game) {
-	log.Println("[DEBUG] Pressed SPACE!")
-	if game.State == StateGameIntermission {
-		NewLevel(game)
-		game.State = StateGamePlaying
-	}
 }
 func (player *Player) RemoveLastByteMessage(game *Game) {
 	if len(player.MessageBuffer) > 0 {
@@ -84,6 +97,7 @@ func (player *Player) SendMessage(game *Game) {
 		player.MessageBuffer = ""
 	}
 }
+
 func (game *Game) ProcessInputs() {
 EventLoop:
 	for {

@@ -17,7 +17,6 @@ type Level struct {
 	PlayerSpawnPoints []Position
 	EnemySpawnPoints  []Position
 	Floor             [][]rune
-	TotalExperience   int
 }
 type Zone struct {
 	Entity
@@ -140,6 +139,7 @@ func NewLevel(game *Game) {
 	level.InitializeSpawnPoints()
 	game.Events = nil
 	game.Level = *level
+	game.LevelNumber++
 	for _, player := range game.GetActivePlayers() {
 		if !player.IsAlive() {
 			continue

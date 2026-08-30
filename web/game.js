@@ -25,6 +25,21 @@
 
     //Receive frames from Go and write them to xterm
     ws.onmessage = (event) => {
+        try {
+            //Try parsing incoming data as JSON for structured background actions
+            const data = JSON.parse(event.data);
+            if (data && data.type === "copy_clipboard") {
+                navigator.clipboard.writeText(data.payload).then(() => {
+                    console.log("Game ID copied to clipboard:", data.payload);
+                }).catch(err => {
+                    console.error("Failed to copy Game ID:", err);
+                });
+                return; //Prevent writing the control packet payload into the terminal view
+            }
+        } catch (e) {
+            //Fallback: If JSON parsing fails, it's a standard raw terminal frame string
+        }
+
         term.write(event.data);
     };
 

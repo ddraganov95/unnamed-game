@@ -20,6 +20,7 @@ type Experience struct {
 	ExperienceVal int
 }
 type PlayerSessionSummary struct {
+	GameID          string        `json:"game_id"`
 	PlayerID        string        `json:"player_id"`
 	SessionStart    time.Time     `json:"session_start"`
 	SessionDuration time.Duration `json:"session_duration"`
@@ -47,6 +48,7 @@ func CreateHealth(maxHealth int) Health {
 }
 func (player *Player) GenerateSummary() PlayerSessionSummary {
 	return PlayerSessionSummary{
+		GameID:          player.GameID,
 		PlayerID:        player.ID,
 		SessionStart:    player.SessionStart,
 		SessionDuration: time.Since(player.SessionStart),
@@ -58,24 +60,26 @@ func (player *Player) GenerateSummary() PlayerSessionSummary {
 	}
 }
 func GetSummaryLines(summary PlayerSessionSummary) []string {
-	duration := summary.SessionDuration.Truncate(time.Second)
+	duration := summary.SessionDuration.Truncate(time.Second).String()
 	return []string{
-		"+--------------------------------------------------+",
-		"|                  Level Complete                  |",
-		"+--------------------------------------------------+",
-		fmt.Sprintf("| Adventurer:     %-32s |", summary.PlayerID),
-		fmt.Sprintf("| Playtime:       %-32v |", duration),
-		"+--------------------------------------------------+",
-		fmt.Sprintf("| Levels Cleared: %-32d |", summary.LevelsCompleted),
-		fmt.Sprintf("| Enemies Slain:  %-32d |", summary.EnemiesKilled),
-		fmt.Sprintf("| XP Gained:      %-32d |", summary.XPGained),
-		"+--------------------------------------------------+",
-		fmt.Sprintf("| Damage Dealt:   %-32d |", summary.DamageDealt),
-		fmt.Sprintf("| Damage Taken:   %-32d |", summary.DamageTaken),
-		"+--------------------------------------------------+",
-		"|             Press [SPACE] to continue            |",
-		"|              Press [Q] to quit game              |",
-		"+--------------------------------------------------+",
+		"+--------------------------------------------------------+",
+		"|                     Level Complete                     |",
+		"+--------------------------------------------------------+",
+		fmt.Sprintf("| Adventurer:     %-38s |", summary.PlayerID),
+		fmt.Sprintf("| Game ID:        %-38s |", summary.GameID),
+		fmt.Sprintf("| Playtime:       %-38s |", duration),
+		"+--------------------------------------------------------+",
+		fmt.Sprintf("| Levels Cleared: %-38d |", summary.LevelsCompleted),
+		fmt.Sprintf("| Enemies Slain:  %-38d |", summary.EnemiesKilled),
+		fmt.Sprintf("| XP Gained:      %-38d |", summary.XPGained),
+		"+--------------------------------------------------------+",
+		fmt.Sprintf("| Damage Dealt:   %-38d |", summary.DamageDealt),
+		fmt.Sprintf("| Damage Taken:   %-38d |", summary.DamageTaken),
+		"+--------------------------------------------------------+",
+		"|               Press [SPACE] to continue                |",
+		"|                Press [Q] to quit game                  |",
+		"|              Press [C] to copy Game ID                 |",
+		"+--------------------------------------------------------+",
 	}
 }
 func GetGameOverSummaryLines(summary PlayerSessionSummary) []string {

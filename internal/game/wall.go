@@ -16,18 +16,14 @@ func (wall *SideWall) GetSymbol() rune {
 func CreateTopWall(id string, pos Position) GameObject {
 
 	return &TopWall{
-		Entity: Entity{
-			ID:       id,
-			Position: pos,
-		},
+		ID:       id,
+		Position: pos,
 	}
 }
 func CreateSideWall(id string, pos Position) GameObject {
 	return &SideWall{
-		Entity: Entity{
-			ID:       id,
-			Position: pos,
-		},
+		ID:       id,
+		Position: pos,
 	}
 }
 

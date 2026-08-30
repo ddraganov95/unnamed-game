@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"uuid"
 
 	"unnamed-game/internal/game"
 
@@ -13,11 +14,17 @@ import (
 )
 
 type Server struct {
-	Game          *game.Game
-	PlayerCounter uint64
-	Upgrader      websocket.Upgrader
-	mu            sync.Mutex
-	activeConns   map[string]*websocket.Conn // Tracks the active WebSocket per player ID
+	PlayerCounter  uint64
+	Upgrader       websocket.Upgrader
+	mu             sync.Mutex
+	activeConns    map[string]*websocket.Conn // Tracks the active WebSocket per player ID
+	activeGames    map[uuid.UUID]*game.Game   //Map gameid -> game
+	playerSessions map[string]uuid.UUID       //Map String playerid -> gameid
+	globalChat     chan string
+}
+type OutboundWSMessage struct {
+	Type    string `json:"type"`
+	Payload string `json:"payload"`
 }
 
 func NewServer() *Server {
@@ -27,7 +34,10 @@ func NewServer() *Server {
 				return true
 			},
 		},
-		activeConns: make(map[string]*websocket.Conn),
+		activeConns:    make(map[string]*websocket.Conn),
+		activeGames:    make(map[uuid.UUID]*game.Game),
+		playerSessions: make(map[string]uuid.UUID),
+		globalChat:     make(chan string, game.MaxChatHistory),
 	}
 }
 
@@ -38,7 +48,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[DEBUG] HandleWebSocket: Started for user %s\n", username)
 
-	g := server.GetOrCreateGame()
+	g := server.GetOrCreateGame(username)
 
 	//Handle connection validation / takeover rules
 	log.Printf("[DEBUG] HandleWebSocket: Calling InitializeConnection for %s\n", username)
@@ -79,19 +89,21 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[DEBUG] HandleWebSocket: Exiting handler for %s\n", username)
 }
 
-func (server *Server) GetOrCreateGame() *game.Game {
+func (server *Server) GetOrCreateGame(playerID string) *game.Game {
 	log.Println("[DEBUG] GetOrCreateGame: about to lock server.mu")
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	log.Println("[DEBUG] GetOrCreateGame: acquired server.mu")
-	log.Printf("[DEBUG] %v", server.Game)
-	if server.Game == nil {
-		globalChat := make(chan string, game.MaxChatHistory)
-		server.Game = game.NewGame(globalChat)
-		go server.listenToGameEvents(server.Game)
+	g, exists := server.FindGameByPlayerId(playerID)
+	if !exists {
+		id := uuid.NewV7()
+		g = game.NewGame(id, server.globalChat)
+		server.AddGame(g)
+		server.AddPlayerIdToGame(playerID, g)
+		go server.listenToGameEvents(g)
 		fmt.Println("-> First player connected: Game instance created and loop started!")
 	}
-	return server.Game
+	return g
 }
 
 func (server *Server) InitializeConnection(g *game.Game, username string) error {
@@ -180,13 +192,18 @@ func (server *Server) streamFrames(g *game.Game, playerID string, conn *websocke
 	}
 
 	log.Printf("[DEBUG] streamFrames: entering frame loop for %s\n", playerID)
-	for frame := range playerChan {
-		if err := conn.WriteMessage(websocket.TextMessage, []byte(frame)); err != nil {
-			log.Printf("[DEBUG] streamFrames: write error for %s: %v\n", playerID, err)
-			break
+	for {
+		select {
+		case <-g.DestroyChan:
+			log.Printf("[DEBUG] streamFrames: game destroyed, exiting for %s\n", playerID)
+			return
+		case frame := <-playerChan:
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(frame)); err != nil {
+				log.Printf("[DEBUG] streamFrames: write error for %s: %v\n", playerID, err)
+				return
+			}
 		}
 	}
-	log.Printf("[DEBUG] streamFrames: exiting for %s\n", playerID)
 }
 
 func (server *Server) readPlayerInputs(g *game.Game, playerID string, conn *websocket.Conn) {
@@ -219,10 +236,28 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			if exists {
 				server.DisconnectPlayer(g, event.PlayerID, conn)
 			}
+		case game.EventTypeMassDisconnect:
+			for _, p := range g.Players {
+				server.mu.Lock()
+				conn, exists := server.activeConns[p.PlayerID]
+				server.mu.Unlock()
+				if exists {
+					server.DisconnectPlayer(g, p.PlayerID, conn)
+				}
+			}
+			event.RespChan <- nil
 		case game.EventTypeIdleCheck:
 			log.Println("[DEBUG] Set Game to Nil")
-			server.Game = nil
+			server.mu.Lock()
+			delete(server.activeGames, g.GameId)
+			server.mu.Unlock()
 			return
+		case game.EventTypeCopyGame:
+			if conn, exists := server.activeConns[event.PlayerID]; exists {
+				conn.WriteJSON(OutboundWSMessage{
+					Type:    "copy_clipboard",
+					Payload: event.Value})
+			}
 		}
 	}
 }
@@ -235,7 +270,7 @@ func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn
 	}
 	server.mu.Unlock()
 
-	// Safely close the underlying socket (this immediately kills readPlayerInputs and streamFrames)
+	//Close the underlying socket (this immediately kills readPlayerInputs and streamFrames)
 	targetConn.Close()
 
 	// Notify the game loop once
@@ -244,4 +279,24 @@ func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn
 		PlayerID: playerID,
 	}
 	log.Printf("[DEBUG] Player %s fully disconnected and cleaned up.", playerID)
+}
+func (server *Server) FindGameById(gameId uuid.UUID) (*game.Game, bool) {
+	if g, exists := server.activeGames[gameId]; exists {
+		return g, true
+	} else {
+		return nil, false
+	}
+}
+func (server *Server) FindGameByPlayerId(playerId string) (*game.Game, bool) {
+	if gameId, exists := server.playerSessions[playerId]; exists {
+		return server.FindGameById(gameId)
+	} else {
+		return nil, false
+	}
+}
+func (server *Server) AddGame(g *game.Game) {
+	server.activeGames[g.GameId] = g
+}
+func (server *Server) AddPlayerIdToGame(playerId string, g *game.Game) {
+	server.playerSessions[playerId] = g.GameId
 }

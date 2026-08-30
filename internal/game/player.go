@@ -120,16 +120,14 @@ func (p *Player) IsAlive() bool {
 }
 func NewPlayer(id string) *Player {
 	player := &Player{
-		Entity:         Entity{ID: id},
-		Health:         Health{CurrentHealth: 100, MaxHealth: 100},
-		Direction:      Direction{X: 0, Y: 0},
+		ID:            id,
+		CurrentHealth: 100, MaxHealth: 100,
+		X: 0, Y: 0,
 		EquippedAttack: AttackBasic,
 		PlayerState:    StatePlaying,
 		DisplayChan:    make(chan string, 100),
-		PlayerSessionSummary: PlayerSessionSummary{
-			PlayerID:     id,
-			SessionStart: time.Now(),
-		},
+		PlayerID:       id,
+		SessionStart:   time.Now(),
 	}
 	player.Experience = Experience{Level: 1, ExperienceVal: 0}
 	player.UnlockAttacks()
