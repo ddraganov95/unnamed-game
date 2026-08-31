@@ -22,6 +22,7 @@ type Experience struct {
 type PlayerSessionSummary struct {
 	GameID          string        `json:"game_id"`
 	PlayerID        string        `json:"player_id"`
+	KilledBy        string        `json:"killed_by"`
 	SessionStart    time.Time     `json:"session_start"`
 	SessionDuration time.Duration `json:"session_duration"`
 	LevelsCompleted int           `json:"levels_completed"`

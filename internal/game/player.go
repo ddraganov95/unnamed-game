@@ -18,6 +18,7 @@ type Player struct {
 	UnlockedAttacks    []Attack
 	LastDamageRecieved Damage
 	PlayerState        PlayerState
+	AFKMinutes         int
 	MessageBuffer      string
 	EquippedAttack     int
 }
@@ -42,6 +43,9 @@ func (s PlayerState) String() string {
 	}
 }
 func (player *Player) MoveUp(game *Game) {
+	if !player.IsAlive() {
+		return
+	}
 	player.Direction = Direction{X: 0, Y: -1}
 	nextPosition := Position{X: player.Position.X, Y: player.Position.Y - 1}
 	if nextPosition.Y < 0 {
@@ -53,6 +57,9 @@ func (player *Player) MoveUp(game *Game) {
 	game.Level.MoveEntity(player, nextPosition)
 }
 func (player *Player) MoveDown(game *Game) {
+	if !player.IsAlive() {
+		return
+	}
 	player.Direction = Direction{X: 0, Y: 1}
 	nextPosition := Position{X: player.Position.X, Y: player.Position.Y + 1}
 	if nextPosition.Y >= game.Level.sizeY {
@@ -64,6 +71,9 @@ func (player *Player) MoveDown(game *Game) {
 	game.Level.MoveEntity(player, nextPosition)
 }
 func (player *Player) MoveLeft(game *Game) {
+	if !player.IsAlive() {
+		return
+	}
 	player.Direction = Direction{X: -1, Y: 0}
 	nextPosition := Position{X: player.Position.X - 1, Y: player.Position.Y}
 	if nextPosition.X < 0 {
@@ -75,6 +85,9 @@ func (player *Player) MoveLeft(game *Game) {
 	game.Level.MoveEntity(player, nextPosition)
 }
 func (player *Player) MoveRight(game *Game) {
+	if !player.IsAlive() {
+		return
+	}
 	player.Direction = Direction{X: 1, Y: 0}
 	nextPosition := Position{X: player.Position.X + 1, Y: player.Position.Y}
 	if nextPosition.X >= game.Level.sizeX {
@@ -87,7 +100,7 @@ func (player *Player) MoveRight(game *Game) {
 }
 func (player *Player) UpdatePlayer(game *Game) {
 	//Naming is intentional so it doesn't get Updatable interface and doesnt get updated with all the entities
-	//This is made so taht we can always process player inputs regardless of game state
+	//This is made so that we can always process player inputs regardless of game state
 	if player.PlayerState == StateDisconnected {
 		return
 	}
@@ -137,6 +150,9 @@ func NewPlayer(id string) *Player {
 	return player
 }
 func (player *Player) Attack(game *Game) {
+	if !player.IsAlive() {
+		return
+	}
 	player.GetAttacksSlice()[player.EquippedAttack].Execute(game, player)
 }
 func (player *Player) GetEquippedAttack() Attack {
@@ -161,12 +177,19 @@ func (player *Player) IsBlocking() bool {
 func (player *Player) TakeDamage(damage Damage, game *Game) {
 	damageToTake := int((damage.Value * (100 - PlayerDamageReductionPercent)) / 100)
 	player.CurrentHealth -= damageToTake
-	if player.CurrentHealth < 0 {
-		player.CurrentHealth = 0
-	}
 	player.LastDamageRecieved = damage
 	player.DamageTaken += damageToTake
+	player.CheckDeath(game)
 	game.CreateLog("%s %s hits %s for %d damage", LogInfo, damage.EntityID, player.GetID(), damageToTake)
+}
+func (player *Player) CheckDeath(game *Game) {
+	if !player.IsAlive() {
+		killer := player.GetLastDamageTakenFrom()
+		player.KilledBy = killer
+		player.CurrentHealth = 0
+		game.CreateLog("%s %s Died to %s", LogSuccess, player.GetID(), killer)
+		game.Level.RemoveEntity(player)
+	}
 }
 func (player *Player) GetDamageMultiplierPercent() int {
 	return PlayerDefaultDamageMultipier * 2 * player.Level
@@ -175,9 +198,12 @@ func (player *Player) IsEnemy() bool {
 	return false
 }
 func (player *Player) GetProjectileSpeed() int {
-	return 0
+	return 3
 }
 func (player *Player) GainXp(xp int) {
+	if !player.IsAlive() {
+		return
+	}
 	player.ExperienceVal += xp
 	player.XPGained += xp
 	if player.LevelUp() {
@@ -207,4 +233,7 @@ func (player *Player) UnlockAttacks() {
 }
 func GetXpRequiredForNextLevel(currentLevel int) int {
 	return int(math.Round(PlayerLevelOneExperience * math.Pow(PlayerLevelXpRequirementMultiplier, float64(currentLevel-1))))
+}
+func (player *Player) GetLastDamageTakenFrom() string {
+	return player.LastDamageRecieved.EntityID
 }

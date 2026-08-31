@@ -101,4 +101,5 @@ const (
 const (
 	InputBufferPerPlayer     = 10
 	StopGameAfterIdleMinutes = 5
+	PlayerAllowedAFKMins     = 10
 )

@@ -1,11 +1,11 @@
 package websocket
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"sync"
-	"time"
 	"uuid"
 
 	"unnamed-game/internal/game"
@@ -26,6 +26,13 @@ type OutboundWSMessage struct {
 	Type    string `json:"type"`
 	Payload string `json:"payload"`
 }
+type GameRequest struct {
+	PlayerID string `json:"player_id"`
+}
+
+type GameResponse struct {
+	GameID string `json:"game_id"`
+}
 
 func NewServer() *Server {
 	return &Server{
@@ -42,22 +49,23 @@ func NewServer() *Server {
 }
 
 func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	username := r.URL.Query().Get("name")
+	username := r.URL.Query().Get("playerId")
 	if username == "" {
-		username = fmt.Sprintf("Adventurer_%d", time.Now().Unix()%1000)
+		log.Println("[DEBUG] HandleWebSocket: MISSING PLAYER ID!!")
+		http.Error(w, "No Player ID.", http.StatusBadRequest)
+		return
 	}
-	log.Printf("[DEBUG] HandleWebSocket: Started for user %s\n", username)
 
-	g := server.GetOrCreateGame(username)
+	g, ok := server.FindGameByPlayerId(username)
+	if !ok {
+		log.Printf("[ERROR] Cannot find game for %s", username)
+		return
+	}
 
 	//Handle connection validation / takeover rules
 	log.Printf("[DEBUG] HandleWebSocket: Calling InitializeConnection for %s\n", username)
 	if err := server.InitializeConnection(g, username); err != nil {
 		status := http.StatusConflict
-		if err.Error() == "game is full" {
-			status := http.StatusServiceUnavailable
-			log.Printf("[DEBUG] HandleWebSocket: Connection rejected for %s: %v (Status: %d)\n", username, err, status)
-		}
 		log.Printf("[DEBUG] HandleWebSocket: Connection rejected for %s: %v (Status: %d)\n", username, err, status)
 		http.Error(w, err.Error(), status)
 		return
@@ -89,21 +97,87 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[DEBUG] HandleWebSocket: Exiting handler for %s\n", username)
 }
 
-func (server *Server) GetOrCreateGame(playerID string) *game.Game {
-	log.Println("[DEBUG] GetOrCreateGame: about to lock server.mu")
+func (server *Server) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var req GameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PlayerID == "" {
+		http.Error(w, "Invalid request payload or missing player_id", http.StatusBadRequest)
+		return
+	}
+
 	server.mu.Lock()
 	defer server.mu.Unlock()
-	log.Println("[DEBUG] GetOrCreateGame: acquired server.mu")
-	g, exists := server.FindGameByPlayerId(playerID)
-	if !exists {
-		id := uuid.NewV7()
-		g = game.NewGame(id, server.globalChat)
-		server.AddGame(g)
-		server.AddPlayerIdToGame(playerID, g)
-		go server.listenToGameEvents(g)
-		fmt.Println("-> First player connected: Game instance created and loop started!")
+
+	targetGameID := uuid.NewV7()
+	targetGame := game.NewGame(targetGameID, server.globalChat)
+
+	server.AddGame(targetGame)
+	go server.listenToGameEvents(targetGame)
+	log.Println("NEW GAME CREATED")
+
+	if err := targetGame.Validate(); err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
 	}
-	return g
+
+	server.AddPlayerIdToGame(req.PlayerID, targetGame)
+	log.Printf("added %s to game: %s", req.PlayerID, targetGame.GameId)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(GameResponse{
+		GameID: targetGameID.String(),
+	})
+}
+
+func (server *Server) HandleJoinGame(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var req GameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PlayerID == "" {
+		http.Error(w, "Invalid request payload or missing parameters", http.StatusBadRequest)
+		return
+	}
+
+	parsedID, err := uuid.Parse(r.PathValue("id"))
+	log.Printf("Game ID : %v", parsedID)
+	if err != nil {
+		http.Error(w, "Invalid game ID format", http.StatusBadRequest)
+		return
+	}
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
+
+	targetGame, exists := server.activeGames[parsedID]
+	if !exists {
+		http.Error(w, "Game session not found", http.StatusNotFound)
+		return
+	}
+	log.Println("OLD GAME FOUND")
+
+	if err := targetGame.Validate(); err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
+	server.AddPlayerIdToGame(req.PlayerID, targetGame)
+	log.Printf("added %s to game: %s", req.PlayerID, targetGame.GameId)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(GameResponse{
+		GameID: parsedID.String(),
+	})
 }
 
 func (server *Server) InitializeConnection(g *game.Game, username string) error {
@@ -144,13 +218,10 @@ func (server *Server) InitializeConnection(g *game.Game, username string) error 
 		fmt.Printf("Player %s entity exists in game. Reconnecting.\n", username)
 		return nil
 	}
-
-	// If they don't exist, validate space
-	err := g.ValidateSpace()
 	g.Mu.RUnlock()
 	log.Println("[DEBUG] Init: released g.Mu (validated space)")
 
-	return err
+	return nil
 }
 
 func (server *Server) RegisterPlayer(g *game.Game, playerID string, conn *websocket.Conn) error {
@@ -217,7 +288,7 @@ func (server *Server) readPlayerInputs(g *game.Game, playerID string, conn *webs
 		}
 
 		if len(msg) > 0 {
-			log.Printf("[DEBUG] Sending Input %s %v", playerID, rune(msg[0]))
+			//log.Printf("[DEBUG] Sending Input %s %v", playerID, rune(msg[0]))
 			g.EventChan <- game.GameEvent{
 				PlayerID: playerID,
 				Type:     game.EventTypeKey,
@@ -254,9 +325,11 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			return
 		case game.EventTypeCopyGame:
 			if conn, exists := server.activeConns[event.PlayerID]; exists {
+				server.mu.Lock()
 				conn.WriteJSON(OutboundWSMessage{
 					Type:    "copy_clipboard",
 					Payload: event.Value})
+				server.mu.Unlock()
 			}
 		}
 	}

@@ -1,0 +1,120 @@
+body {
+    background-color: #0b0f19;
+    color: #f3f4f6;
+    font-family: 'Courier New', Courier, monospace;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    overflow: hidden;
+}
+.card, .lobby-card {
+    background: #121826;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+    border: 1px solid #1f2937;
+    width: 350px;
+    box-sizing: border-box;
+}
+
+.lobby-card {
+    width: 420px;
+}
+
+h2 {
+    margin-top: 0;
+    color: #ffffff;
+    font-size: 18px;
+    text-align: center;
+    letter-spacing: 1px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: #9ca3af;
+    text-transform: uppercase;
+}
+
+input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    background: #0b0f19;
+    border: 1px solid #374151;
+    color: #f3f4f6;
+    font-family: monospace;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+input[type="text"]:focus {
+    border-color: #60a5fa;
+    outline: none;
+}
+
+button {
+    width: 100%;
+    padding: 10px;
+    background: #1f2937;
+    border: 1px solid #4b5563;
+    color: #f3f4f6;
+    font-family: monospace;
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+button:hover {
+    background: #374151;
+    border-color: #60a5fa;
+}
+
+.join-row {
+    display: flex;
+    gap: 10px;
+}
+
+.join-row input {
+    flex: 1;
+}
+
+.join-row button {
+    width: 100px;
+}
+
+.divider {
+    border: 0;
+    border-top: 1px solid #1f2937;
+    margin: 20px 0;
+}
+
+.hidden {
+    display: none !important;
+}
+#error-label {
+    color: #ef4444;
+    margin-top: 15px;
+    font-size: 13px;
+    text-align: center;
+}
+.terminal-container {
+    background: #121826;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+    border: 1px solid #1f2937;
+    /*display: none; */
+}
+
+.xterm {
+    font-size: 11px;
+    line-height: 1.1;
+}

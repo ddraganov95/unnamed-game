@@ -2,20 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Terminal Dungeon Crawler</title>
-    <link rel="stylesheet" href="styles.css">
-    <!-- Xterm.js CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <title>Terminal Dungeon - Identify</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <main class="terminal-container">
-        <!-- Xterm will inject the terminal canvas right here -->
-        <div id="terminal"></div>
-    </main>
-
-    <!-- Xterm.js Core Library -->
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-    <script src="game.js"></script>
+    <div class="card">
+        <h2>IDENTIFY YOURSELF</h2>
+        <div class="form-group">
+            <label for="username">Adventurer</label>
+            <input type="text" id="username" placeholder="HeroOfBulgaria" autocomplete="off" autofocus>
+        </div>
+        <button id="submit-btn">Continue</button>
+    </div>
+    <script src="username.js"></script>
 </body>
 </html>

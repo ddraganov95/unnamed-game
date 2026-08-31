@@ -9,19 +9,18 @@
     term.open(document.getElementById('terminal'));
 
     //Connect to Go WebSocket backend
-    // Hardcoded name for testing
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const urlParams = new URLSearchParams(window.location.search);
+    const gameId = urlParams.get('gameId');
+    const playerId = urlParams.get('playerId');
 
-    const myPlayerName = "HeroOfBulgaria"; 
-
-    //Build the full dynamic URL including the query parameter
-    const wsUrl = `${protocol}//${window.location.host}/ws?name=${encodeURIComponent(myPlayerName)}`;
-
-    const ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-        term.writeln("Connected to dungeon server...\r\n");
-    };
+    // Connect using the parameters provided by the lobby API redirect
+    const ws = new WebSocket(`ws://${window.location.host}/ws?gameId=${encodeURIComponent(gameId)}&playerId=${encodeURIComponent(playerId)}`);
+    
+    let connectionEstablished = false;
+   ws.onopen = () => {
+    connectionEstablished = true;
+    term.writeln("Connected to dungeon server...\r\n");
+};
 
     //Receive frames from Go and write them to xterm
     ws.onmessage = (event) => {
@@ -49,8 +48,17 @@
     };
 
     ws.onclose = () => {
-        term.writeln("\r\nDisconnected from server.");
-    };
+    if (!connectionEstablished) {
+        // Handshake failed
+        window.location.href = '/lobby.html?error=' + encodeURIComponent("Connection rejected: Game is full or unavailable.");
+    } else {
+        // Disconnected mid-game after playing
+        term.writeln("\r\nDisconnected from server. Returning to lobby...");
+        setTimeout(() => {
+            window.location.href = '/lobby.html';
+        }, 1000);
+    }
+};
 
     //Capture keyboard inputs and send them to Go
     term.onData(data => {

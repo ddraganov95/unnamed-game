@@ -1,7 +1,6 @@
 package game
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -94,6 +93,9 @@ func UpdateGame(game *Game) {
 	game.Level.Update(game) //Check win/loss conditions
 }
 func (game *Game) DrawLevelForPlayer(level Level, player *Player) string {
+	if !player.IsAlive() {
+		return game.DrawGameOverForPlayer(level, player)
+	}
 	//Reset the frame
 	game.ClearFrame()
 	//Draw Logs
@@ -137,6 +139,9 @@ func (game *Game) DrawSummaryScreenForPlayer(level Level, player *Player, summar
 	return game.FlushFrame()
 }
 func (game *Game) DrawLevelIntermissionForPlayer(level Level, player *Player) string {
+	if !player.IsAlive() {
+		return game.DrawGameOverForPlayer(level, player)
+	}
 	var summary PlayerSessionSummary
 	if player != nil {
 		summary = player.GenerateSummary()
@@ -362,9 +367,15 @@ func (game *Game) GetPlayerByID(playerID string) (*Player, bool) {
 	}
 	return nil, false
 }
+func (game *Game) Validate() error {
+	if err := game.ValidateSpace(); err != nil {
+		return err
+	}
+	return nil
+}
 func (game *Game) ValidateSpace() error {
 	if len(game.GetActivePlayers()) >= MaxPlayerCount {
-		return fmt.Errorf("game is full")
+		return fmt.Errorf("Game is full")
 	}
 	return nil
 }
@@ -390,10 +401,14 @@ func (game *Game) HandlePlayerConnect(playerID string) error {
 	if player, exists := game.GetPlayerByID(playerID); exists {
 		log.Println("[DEBUG] Existing Player Connecting")
 		//Same level reconnecting try same position
-		if game.LevelNumber-1 == player.LevelsCompleted && !game.Level.PutEntityAtPosition(player, player.GetPosition()) {
-			return errors.New("Failed to place player: Spawn point was blocked.")
+		if game.LevelNumber-1 == player.LevelsCompleted {
+			//Try restoring exact position
+			if !game.Level.PutEntityAtPosition(player, player.GetPosition()) {
+				log.Printf("[DEBUG] Old position blocked for %s, falling back to spawn", playerID)
+				game.SpawnPlayer(player)
+			}
 		} else {
-			//Reconnecting after players continued
+			// Reconnecting after the lobby advanced to a new level
 			game.SpawnPlayer(player)
 		}
 		player.PlayerState = StatePlaying
@@ -401,7 +416,7 @@ func (game *Game) HandlePlayerConnect(playerID string) error {
 		log.Println("[DEBUG] New Player Connecting")
 		player := NewPlayer(playerID)
 		player.GameID = game.GameId.String()
-		log.Printf("[DEBUG] -------------------New Player Game id: %s", player.GameID)
+		log.Printf("[DEBUG] New Player Game id: %s", player.GameID)
 		game.SpawnPlayer(player)
 	}
 	game.EmptyMinutes = 0
@@ -445,6 +460,14 @@ func HandleEmptyGame(game *Game) {
 			return
 		case <-ticker.C:
 			game.Mu.Lock()
+			log.Printf("[DEBUG] AFK TIMER TICK!")
+			for _, p := range game.Players {
+				p.AFKMinutes++
+				log.Printf("[DEBUG] Player %s afk for %d minute(s)", p.GetID(), p.AFKMinutes)
+				if p.AFKMinutes >= PlayerAllowedAFKMins {
+					game.HandlePlayerDisconnect(p.GetID())
+				}
+			}
 			if len(game.GetActivePlayers()) == 0 || game.State != StateGamePlaying {
 				game.EmptyMinutes++
 				log.Printf("[DEBUG] Game empty for %d minute(s)", game.EmptyMinutes)

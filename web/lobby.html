@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Terminal Dungeon - Lobby</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="lobby-card">
+        <h2>DUNGEON GATEWAY</h2>
+        
+        <div class="form-group">
+            <button id="btn-start" type="button">Start New Game</button>
+        </div>
+        
+        <hr class="divider">
+
+        <div class="form-group">
+            <label for="game-id-input">Join Existing Game</label>
+            <div class="join-row">
+                <input type="text" id="game-id-input" placeholder="Paste Game UUID..." autocomplete="off">
+                <button id="btn-join" type="button">Join</button>
+            </div>
+        </div>
+
+        <div class="lobby-container">
+            <div id="error-label"></div>
+        </div>
+    </div>
+
+    <script src="lobby.js"></script>
+</body>
+</html>

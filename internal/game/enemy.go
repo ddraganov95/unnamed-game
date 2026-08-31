@@ -2,6 +2,8 @@ package game
 
 import (
 	"fmt"
+	"log"
+	"math"
 )
 
 type Enemy struct {
@@ -142,6 +144,7 @@ func (archer *Archer) GetDamageMultiplierPercent() int {
 	return EnemyDefaultDamageMultipier - 30
 }
 func (archer *Archer) GetProjectileSpeed() int {
+	log.Println("[DEBUG] Archer Projectile")
 	return ProjectileDefaultTravelSpeed * 15
 }
 func (enemy *Enemy) SetSpeed(moveSpeed int, attackSpeed int) {
@@ -225,6 +228,7 @@ func (enemy *Enemy) IsEnemy() bool {
 	return true
 }
 func (enemy *Enemy) GetProjectileSpeed() int {
+	log.Println("[DEBUG] Enemy Projectile")
 	return ProjectileDefaultTravelSpeed
 }
 func UpdateEnemy(game *Game, enemy GenericEnemy) {
@@ -260,8 +264,11 @@ func UpdateEnemy(game *Game, enemy GenericEnemy) {
 func GetPlayerInRange(scanRange int, enemy GenericEnemy, game *Game) (*Player, bool) {
 	enemyPos := enemy.GetPosition()
 
+	var closestPlayer *Player
+	minDist := math.MaxInt
+
 	for _, player := range game.GetActivePlayers() {
-		if player == nil {
+		if player == nil || !player.IsAlive() {
 			continue
 		}
 
@@ -269,10 +276,20 @@ func GetPlayerInRange(scanRange int, enemy GenericEnemy, game *Game) (*Player, b
 		dx := abs(player.Position.X - enemyPos.X)
 		dy := abs(player.Position.Y - enemyPos.Y)
 
-		// Scans the full square radius in all directions (including diagonals)
+		// Check if player is within the bounding scan range box
 		if dx <= scanRange && dy <= scanRange {
-			return player, true
+			// Use squared Euclidean distance to compare true distance without floating-point math
+			dist := dx*dx + dy*dy
+
+			if dist < minDist {
+				minDist = dist
+				closestPlayer = player
+			}
 		}
+	}
+
+	if closestPlayer != nil {
+		return closestPlayer, true
 	}
 
 	return nil, false

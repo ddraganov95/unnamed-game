@@ -63,7 +63,10 @@ func (player *Player) QuitGame(game *Game) {
 	fmt.Print("Quitting Game...\r\n")
 }
 func (player *Player) GetNextLevel(game *Game) {
-	log.Println("[DEBUG] Pressed c!")
+	log.Printf("[DEBUG] %s ,Pressed Space!", player.GetID())
+	if !player.IsAlive() {
+		return
+	}
 	if game.State == StateGameIntermission {
 		NewLevel(game)
 		game.EmptyMinutes = 0
@@ -115,9 +118,10 @@ EventLoop:
 				log.Printf("[DEBUG] Disco %s ", event.PlayerID)
 				game.HandlePlayerDisconnect(event.PlayerID)
 			case EventTypeKey:
-				log.Printf("[DEBUG] Reading Input %s %v", event.PlayerID, event.Key)
+				//log.Printf("[DEBUG] Reading Input %s %v", event.PlayerID, event.Key)
 				if receiver, ok := game.GetActivePlayerById(event.PlayerID); ok {
 					receiver.EnqueueKey(event.Key)
+					receiver.AFKMinutes = 0
 				}
 			}
 		default:

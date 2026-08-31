@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -91,6 +92,7 @@ func CreateProjectile(attacker Attacker, attack Attack) Projectile {
 		Attack:               &attack,
 		IsEnemy:              attacker.IsEnemy(),
 		CurrentMovementSpeed: 0,
+		MaxMovementSpeed:     attacker.GetProjectileSpeed(),
 	}
 }
 func (arrow *Arrow) GetSymbol() rune {
@@ -173,12 +175,12 @@ func CreateSpell(attacker Attacker, attack *Attack) GameObject {
 	}
 }
 func (projectile *Projectile) Update(game *Game) {
-	fmt.Printf("Projectile %s tried to move with %v speed\n", projectile.GetEntityID(), projectile.CurrentMovementSpeed)
+	//fmt.Printf("Projectile %s tried to move with %v speed\n", projectile.GetEntityID(), projectile.CurrentMovementSpeed)
 	if projectile.CurrentMovementSpeed > 0 {
 		projectile.CurrentMovementSpeed--
 		return
 	}
-	fmt.Printf("Projectile %s actually moved!\n", projectile.GetEntityID())
+	//fmt.Printf("Projectile %s actually moved!\n", projectile.GetEntityID())
 	projectile.ResetMovementSpeed()
 	projectile.Attack.Range--
 	//Check Range
@@ -201,14 +203,20 @@ func (projectile *Projectile) Update(game *Game) {
 	}
 
 	// Check attackable entities
-	if attackable, exists := game.Level.GetAttackableAt(newPos); exists && !(projectile.IsEnemy && attackable.IsEnemy()) {
-		game.DealDamage(*projectile.Attack, attackable)
-		game.Level.RemoveEntity(projectile)
+	if attackable, exists := game.Level.GetAttackableAt(newPos); exists {
+		log.Println("projectile found attackable")
+		if projectile.IsEnemy != attackable.IsEnemy() {
+			log.Printf("%s got hit by projectile %s sent by %s", attackable.GetID(), projectile.GetID(), projectile.SenderID)
+			game.DealDamage(*projectile.Attack, attackable)
+			game.Level.RemoveEntity(projectile)
+		}
+		game.Level.MoveEntity(projectile, newPos)
 		return
 	}
 
 	// Check blockers
-	if blocker, blocked := game.Level.GetBlockerAt(newPos); blocked && !(projectile.IsEnemy && blocker.IsEnemy()) {
+	if _, blocked := game.Level.GetBlockerAt(newPos); blocked {
+		log.Println("projectile blocked")
 		game.Level.RemoveEntity(projectile)
 		return
 	}
