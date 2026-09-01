@@ -57,4 +57,29 @@ if (!playerId) {
         const data = await response.json();
         window.location.href = `/game.html?gameId=${encodeURIComponent(data.game_id)}&playerId=${encodeURIComponent(playerId)}`;
     });
+    const chatSocket = new WebSocket(`ws://${window.location.host}/ws/global-chat?playerId=${encodeURIComponent(playerId)}`);
+    const chatBox = document.getElementById('chat-box');
+    const chatInput = document.getElementById('chat-input');
+
+    // Receive broadcast messages
+    chatSocket.onmessage = (event) => {
+    const msgDiv = document.createElement('div');
+    msgDiv.textContent = event.data;
+    chatBox.appendChild(msgDiv);
+    chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll
+};
+
+    // Send message
+    function sendChatMessage() {
+    const text = chatInput.value.trim();
+    if (text && chatSocket.readyState === WebSocket.OPEN) {
+        chatSocket.send(text);
+        chatInput.value = '';
+    }
+}
+
+    document.getElementById('btn-send-chat').addEventListener('click', sendChatMessage);
+    chatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sendChatMessage();
+});
 }

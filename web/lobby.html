@@ -2,30 +2,48 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Terminal Dungeon - Lobby</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <div class="lobby-card">
-        <h2>DUNGEON GATEWAY</h2>
-        
-        <div class="form-group">
-            <button id="btn-start" type="button">Start New Game</button>
-        </div>
-        
-        <hr class="divider">
+    <div class="lobby-card wide-dashboard">
+        <h2 class="lobby-title">DUNGEON GATEWAY</h2>
 
-        <div class="form-group">
-            <label for="game-id-input">Join Existing Game</label>
-            <div class="join-row">
-                <input type="text" id="game-id-input" placeholder="Paste Game UUID..." autocomplete="off">
-                <button id="btn-join" type="button">Join</button>
+        <!-- Top Row: Start & Join side-by-side -->
+        <div class="top-actions">
+            <div class="action-block">
+                <label>HOST GAME</label>
+                <button id="btn-start" type="button">Start New Game</button>
+            </div>
+
+            <div class="action-block">
+                <label for="game-id-input">JOIN EXISTING GAME</label>
+                <div class="join-row">
+                    <input type="text" id="game-id-input" placeholder="Paste Game UUID..." autocomplete="off">
+                    <button id="btn-join" type="button">Join</button>
+                </div>
             </div>
         </div>
 
-        <div class="lobby-container">
-            <div id="error-label"></div>
+        <div id="error-label"></div>
+
+        <hr class="divider">
+
+        <!-- Bottom Area: Expanded Global Chat -->
+        <div class="chat-section">
+            <div class="chat-header">
+                <label>GLOBAL CHAT</label>
+                <span class="online-indicator">● LIVE</span>
+            </div>
+            
+            <div id="chat-box" class="chat-box"></div>
+            
+            <div class="join-row">
+                <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                <button id="btn-send-chat" type="button">Send</button>
+            </div>
         </div>
     </div>
 

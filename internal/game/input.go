@@ -14,6 +14,7 @@ const (
 	EventTypeMassDisconnect
 	EventTypeIdleCheck
 	EventTypeCopyGame
+	EventTypeGlobalChatMsg
 )
 
 type GameEvent struct {
@@ -96,7 +97,10 @@ func (player *Player) RemoveLastByteMessage(game *Game) {
 }
 func (player *Player) SendMessage(game *Game) {
 	if len(player.MessageBuffer) > 0 {
-		game.GlobalChat <- fmt.Sprintf("%s : %s", player.GetID(), player.MessageBuffer)
+		game.ServerEventChan <- ServerEvent{
+			Type:     EventTypeGlobalChatMsg,
+			PlayerID: player.GetID(),
+			Value:    player.MessageBuffer}
 		player.MessageBuffer = ""
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	"unnamed-game/internal/websocket"
+	"unnamed-game/internal/server"
 )
 
 func main() {
@@ -13,14 +13,16 @@ func main() {
 	mux := http.NewServeMux()
 
 	//Initialize the server container
-	srv := websocket.NewServer()
+	srv := server.NewServer()
 
 	//Register REST API Endpoints
 	mux.HandleFunc("POST /api/games", srv.HandleCreateGame)
 	mux.HandleFunc("POST /api/games/{id}/join", srv.HandleJoinGame)
 
-	// Register WebSocket route
+	// Register Game WebSocket route
 	mux.HandleFunc("/ws", srv.HandleWebSocket)
+	// Register Global Chat WebSocket route
+	mux.HandleFunc("/ws/global-chat", srv.HandleLobbyChatWS)
 
 	// Serve static files
 	fileServer := http.FileServer(http.Dir("./web"))
