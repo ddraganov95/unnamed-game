@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"unnamed-game/internal/game"
 
@@ -20,6 +21,7 @@ func (server *Server) BroadcastGlobalChat(playerid string, message string) {
 	}
 
 	for conn := range server.lobbyConns {
+		conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 		if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
 			conn.Close()
 			delete(server.lobbyConns, conn)

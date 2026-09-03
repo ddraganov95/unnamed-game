@@ -31,19 +31,26 @@
 
         <hr class="divider">
 
-        <!-- Bottom Area: Expanded Global Chat -->
-        <div class="chat-section">
-            <div class="chat-header">
-                <label>GLOBAL CHAT</label>
-                <span class="online-indicator">● LIVE</span>
+        <!-- Tab Controls -->
+        <div class="tab-navigation">
+            <button type="button" class="tab-btn active" data-tab="tab-chat">CHAT</button>
+            <button type="button" class="tab-btn" data-tab="tab-profile">PROFILE</button>
+        </div>
+
+        <!-- Tab Content Wrapper -->
+        <div class="tab-container">
+            <!-- CHAT TAB -->
+            <div id="tab-chat" class="tab-content active chat-section">
+                <div id="chat-box" class="chat-box"></div>
+                
+                <div class="join-row">
+                    <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                    <button id="btn-send-chat" type="button">Send</button>
+                </div>
             </div>
-            
-            <div id="chat-box" class="chat-box"></div>
-            
-            <div class="join-row">
-                <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
-                <button id="btn-send-chat" type="button">Send</button>
-            </div>
+
+            <!-- PROFILE TAB (Empty wrapper for profile.html) -->
+            <div id="tab-profile" class="tab-content"></div>
         </div>
     </div>
 

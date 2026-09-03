@@ -198,7 +198,7 @@ func (player *Player) IsEnemy() bool {
 	return false
 }
 func (player *Player) GetProjectileSpeed() int {
-	return 3
+	return 2
 }
 func (player *Player) GainXp(xp int) {
 	if !player.IsAlive() {

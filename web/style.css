@@ -154,11 +154,6 @@ button:hover {
     margin-bottom: 8px;
 }
 
-.online-indicator {
-    font-size: 11px;
-    color: #22c55e;
-}
-
 .chat-box {
     height: 320px;
     background-color: #05070a;
@@ -210,4 +205,94 @@ button:hover {
 /* Utilities */
 .hidden {
     display: none !important;
+}
+.tab-navigation {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid #1f2937;
+}
+
+.tab-btn {
+    width: auto;
+    height: 36px;
+    padding: 0 20px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    color: #9ca3af;
+    font-size: 12px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.tab-btn:hover {
+    background: transparent;
+    color: #f3f4f6;
+    border-color: #374151;
+}
+
+.tab-btn.active {
+    color: #60a5fa;
+    border-bottom: 2px solid #60a5fa;
+    font-weight: bold;
+}
+
+/* Tab Display Logic */
+.tab-container {
+    flex: 1;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Profile Tab Styling */
+.profile-card {
+    min-height: 374px;
+    background-color: #05070a;
+    border: 1px solid #1a2634;
+    border-radius: 4px;
+    padding: 20px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-family: monospace;
+    font-size: 13px;
+}
+
+.profile-stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #1f2937;
+}
+
+.profile-stat-label {
+    color: #9ca3af;
+}
+
+.profile-stat-value {
+    color: #60a5fa;
+    font-weight: bold;
+}
+
+.profile-placeholder {
+    color: #6b7280;
+    text-align: center;
+    margin-top: 40px;
+}
+.profile-error {
+    color: #ef4444;
+    text-align: center;
+    padding: 40px 0;
+    font-family: monospace;
 }

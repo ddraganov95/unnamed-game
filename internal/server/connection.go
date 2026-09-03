@@ -1,7 +1,10 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"log"
+	"time"
 
 	"unnamed-game/internal/game"
 
@@ -96,6 +99,27 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			server.mu.Lock()
 			conn, exists := server.activeConns[event.PlayerID]
 			server.mu.Unlock()
+
+			if player, ok := g.GetPlayerByID(event.PlayerID); ok {
+				log.Printf("[INFO] Found player for DC %s \n", event.PlayerID)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				user, err := server.db.UpdateUserWithSummary(ctx, player.GenerateSummary())
+				cancel()
+
+				if err != nil {
+					log.Printf("[ERROR] Failed to save stats for %s on disconnect: %v\n", event.PlayerID, err)
+				} else {
+					log.Printf("[DB] Successfully saved session summary for %s\n", event.PlayerID)
+					if exists {
+						_ = conn.WriteJSON(map[string]any{
+							"type": "session_summary",
+							"user": user,
+						})
+						log.Printf("[DB] Successfully SENT session summary for %s\n", event.PlayerID)
+					}
+				}
+			}
+
 			if exists {
 				server.DisconnectPlayer(g, event.PlayerID, conn)
 			}
@@ -105,6 +129,18 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 				server.mu.Lock()
 				conn, exists := server.activeConns[p.PlayerID]
 				server.mu.Unlock()
+
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, err := server.db.UpdateUserWithSummary(ctx, p.GenerateSummary())
+				log.Printf("[UPDATE] Mass disconnect: stats update for %s: %v\n", p.PlayerID, p.GenerateSummary())
+				cancel()
+
+				if err != nil {
+					log.Printf("[ERROR] Failed to save stats for %s on disconnect: %v\n", event.PlayerID, err)
+				} else {
+					log.Printf("[DB] Successfully saved session summary for %s\n", event.PlayerID)
+				}
+
 				if exists {
 					server.DisconnectPlayer(g, p.PlayerID, conn)
 				}
