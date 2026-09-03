@@ -4,35 +4,43 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-
 	"unnamed-game/internal/server"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	//Create Router
-	mux := http.NewServeMux()
-
+	_ = godotenv.Load()
 	//Initialize the server container
-	srv := server.NewServer()
+	srv, err := server.NewServer()
+	if err != nil {
+		log.Fatalf("Failed to initialize server: %v", err)
+	}
 
 	//Register REST API Endpoints
-	mux.HandleFunc("POST /api/games", srv.HandleCreateGame)
-	mux.HandleFunc("POST /api/games/{id}/join", srv.HandleJoinGame)
+	srv.Mux.HandleFunc("POST /api/users", srv.HandleCreateUser)
 
-	// Register Game WebSocket route
-	mux.HandleFunc("/ws", srv.HandleWebSocket)
-	// Register Global Chat WebSocket route
-	mux.HandleFunc("/ws/global-chat", srv.HandleLobbyChatWS)
+	srv.Mux.HandleFunc("GET /api/users/{id}", srv.HandleGetUser)
 
-	// Serve static files
+	srv.Mux.HandleFunc("GET /api/users/me", srv.HandleGetSelf)
+
+	srv.Mux.HandleFunc("POST /api/games", srv.HandleCreateGame)
+	srv.Mux.HandleFunc("POST /api/games/{id}/join", srv.HandleJoinGame)
+
+	//Register Game WebSocket route
+	srv.Mux.HandleFunc("/ws", srv.HandleWebSocket)
+	//Register Global Chat WebSocket route
+	srv.Mux.HandleFunc("/ws/global-chat", srv.HandleLobbyChatWS)
+
+	//Serve static files
 	fileServer := http.FileServer(http.Dir("./web"))
-	mux.Handle("/", fileServer)
+	srv.Mux.Handle("/", fileServer)
 
 	fmt.Println("Hello To Unnamed RPG Game Server")
 
 	port := ":8080"
 	fmt.Printf("Server running at http://localhost%s\n", port)
-	if err := http.ListenAndServe(port, mux); err != nil {
+	if err := http.ListenAndServe(port, srv.Mux); err != nil {
 		log.Fatal("Server error: ", err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"uuid"
 
+	"unnamed-game/internal/db"
 	"unnamed-game/internal/game"
 
 	"github.com/gorilla/websocket"
@@ -21,6 +22,8 @@ type Server struct {
 	chatHistory    []string
 	globalChat     chan string
 	lobbyMu        sync.Mutex
+	db             *db.Database
+	Mux            *http.ServeMux
 }
 
 type OutboundWSMessage struct {
@@ -36,7 +39,11 @@ type GameResponse struct {
 	GameID string `json:"game_id"`
 }
 
-func NewServer() *Server {
+func NewServer() (*Server, error) {
+	database, err := db.NewDatabase()
+	if err != nil {
+		return nil, err
+	}
 	return &Server{
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
@@ -46,8 +53,11 @@ func NewServer() *Server {
 		activeConns:    make(map[string]*websocket.Conn),
 		activeGames:    make(map[uuid.UUID]*game.Game),
 		playerSessions: make(map[string]uuid.UUID),
+		lobbyConns:     make(map[*websocket.Conn]bool),
 		globalChat:     make(chan string, game.MaxChatHistory),
-	}
+		Mux:            http.NewServeMux(),
+		db:             database,
+	}, nil
 }
 
 func (server *Server) FindGameById(gameId uuid.UUID) (*game.Game, bool) {
