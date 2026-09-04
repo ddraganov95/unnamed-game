@@ -125,7 +125,9 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			}
 
 		case game.EventTypeMassDisconnect:
-			for _, p := range g.Players {
+			playersToDisconnect := make([]*game.Player, len(g.Players))
+			copy(playersToDisconnect, g.Players)
+			for _, p := range playersToDisconnect {
 				server.mu.Lock()
 				conn, exists := server.activeConns[p.PlayerID]
 				server.mu.Unlock()

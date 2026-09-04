@@ -30,6 +30,8 @@ type PlayerSessionSummary struct {
 	XPGained        int           `json:"xp_gained"`
 	DamageDealt     int           `json:"damage_dealt"`
 	DamageTaken     int           `json:"damage_taken"`
+	PlayerLevel     int           `json:"player_level"`
+	Deaths          int           `json:"player_deaths"`
 }
 
 func (h *Health) TakeDamage(amount int) {
@@ -48,6 +50,10 @@ func CreateHealth(maxHealth int) Health {
 	}
 }
 func (player *Player) GenerateSummary() PlayerSessionSummary {
+	deaths := 0
+	if !player.IsAlive() {
+		deaths = 1
+	}
 	return PlayerSessionSummary{
 		GameID:          player.GameID,
 		PlayerID:        player.ID,
@@ -58,6 +64,8 @@ func (player *Player) GenerateSummary() PlayerSessionSummary {
 		XPGained:        player.XPGained,
 		DamageDealt:     player.DamageDealt,
 		DamageTaken:     player.DamageTaken,
+		PlayerLevel:     player.Level,
+		Deaths:          deaths,
 	}
 }
 func GetSummaryLines(summary PlayerSessionSummary) []string {

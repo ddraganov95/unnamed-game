@@ -1,6 +1,7 @@
 package game
 
 import (
+	"log"
 	"math"
 	"time"
 )
@@ -178,6 +179,7 @@ func (player *Player) TakeDamage(damage Damage, game *Game) {
 	damageToTake := int((damage.Value * (100 - PlayerDamageReductionPercent)) / 100)
 	player.CurrentHealth -= damageToTake
 	player.LastDamageRecieved = damage
+	log.Printf("[PLAYER]: Took damage %d from %s", player.LastDamageRecieved.Value, damage.EntityID)
 	player.DamageTaken += damageToTake
 	player.CheckDeath(game)
 	game.CreateLog("%s %s hits %s for %d damage", LogInfo, damage.EntityID, player.GetID(), damageToTake)
@@ -186,6 +188,7 @@ func (player *Player) CheckDeath(game *Game) {
 	if !player.IsAlive() {
 		killer := player.GetLastDamageTakenFrom()
 		player.KilledBy = killer
+		log.Printf("[PLAYER]: Killed by %s, last damage taken from: %s", killer, player.LastDamageRecieved.EntityID)
 		player.CurrentHealth = 0
 		game.CreateLog("%s %s Died to %s", LogSuccess, player.GetID(), killer)
 		game.Level.RemoveEntity(player)

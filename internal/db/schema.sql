@@ -9,6 +9,10 @@ total_damage_taken bigint DEFAULT 0,
 total_levels_completed int DEFAULT 0,
 total_game_time bigint DEFAULT 0,
 total_deaths int DEFAULT 0,
-highest_player_level int DEFAULT 1
+highest_player_level int DEFAULT 1,
+total_enemies_killed int DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_users_player_id ON users(player_id);
+
+/*ALTER TABLE users 
+ADD COLUMN IF NOT EXISTS total_enemies_killed bigint DEFAULT 0;*/

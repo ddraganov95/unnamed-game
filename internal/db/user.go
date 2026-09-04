@@ -29,6 +29,7 @@ type User struct {
 	TotalGameTime        int64     `db:"total_game_time" json:"total_game_time"`
 	TotalDeaths          int       `db:"total_deaths" json:"total_deaths"`
 	HighestPlayerLevel   int       `db:"highest_player_level" json:"highest_player_level"`
+	TotalEnemiesKilled   int       `db:"total_enemies_killed" json:"total_enemies_killed"`
 }
 
 func (db *Database) GetOrCreateUser(ctx context.Context, playerID string) (*UserRef, error) {
@@ -41,22 +42,20 @@ func (db *Database) GetOrCreateUser(ctx context.Context, playerID string) (*User
 	return &ref, nil
 }
 func (db *Database) UpdateUserWithSummary(ctx context.Context, summary game.PlayerSessionSummary) (*User, error) {
-	deaths := 0
-	if summary.KilledBy != "" {
-		deaths = 1
-	}
 
+	log.Printf("[DB DEATHS]: %d", summary.Deaths)
 	gameTimeSeconds := int64(summary.SessionDuration.Seconds())
 
 	rows, err := db.Pool.Query(ctx, UptateUserWithSummary,
 		summary.PlayerID,
 		summary.XPGained,
+		summary.EnemiesKilled,
 		summary.DamageDealt,
 		summary.DamageTaken,
 		summary.LevelsCompleted,
 		gameTimeSeconds,
-		deaths,
-		summary.LevelsCompleted,
+		summary.Deaths,
+		summary.PlayerLevel,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute session summary update: %w", err)

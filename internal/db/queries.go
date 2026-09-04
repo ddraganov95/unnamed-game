@@ -13,15 +13,17 @@ const (
 	UptateUserWithSummary = `
 	UPDATE users
 	SET total_xp_gained = total_xp_gained + $2,
-	total_damage_dealt = total_damage_dealt + $3,
-	total_damage_taken = total_damage_taken + $4,
-	total_levels_completed = total_levels_completed + $5,
-	total_game_time = total_game_time + $6,
-	total_deaths = total_deaths + $7,
-	highest_player_level = GREATEST(highest_player_level, $8)
+	total_enemies_killed = total_enemies_killed + $3,
+	total_damage_dealt = total_damage_dealt + $4,
+	total_damage_taken = total_damage_taken + $5,
+	total_levels_completed = total_levels_completed + $6,
+	total_game_time = total_game_time + $7,
+	total_deaths = total_deaths + $8,
+	highest_player_level = GREATEST(highest_player_level, $9)
 	WHERE player_id = $1
 	RETURNING player_id,
 	total_xp_gained,
+	total_enemies_killed,
 	total_damage_dealt,
 	total_damage_taken,
 	total_levels_completed,
@@ -33,6 +35,7 @@ const (
 const (
 	GetUserSummary = `
 	Select player_id,
+	total_enemies_killed,
 	total_xp_gained,
 	total_damage_dealt,
 	total_damage_taken,

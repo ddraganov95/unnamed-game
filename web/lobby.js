@@ -68,12 +68,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     // 4. Populate UI
-                    document.getElementById('stat-player-id').textContent = userData.player_id || '--';
-                    document.getElementById('stat-levels').textContent = userData.total_levels_completed ?? 0;
-                    document.getElementById('stat-enemies').textContent = userData.total_deaths ?? userData.total_enemies_killed ?? 0;
-                    document.getElementById('stat-xp').textContent = userData.total_xp_gained ?? 0;
-                    document.getElementById('stat-damage-dealt').textContent = userData.total_damage_dealt ?? 0;
-                    document.getElementById('stat-damage-taken').textContent = userData.total_damage_taken ?? 0;
+                        document.getElementById('stat-player-id').textContent = userData.player_id || '--';
+                        document.getElementById('stat-highest-level').textContent = userData.highest_player_level ?? 1;
+                        document.getElementById('stat-levels').textContent = userData.total_levels_completed ?? 0;
+                        document.getElementById('stat-enemies').textContent = userData.total_enemies_killed ?? 0;
+                        document.getElementById('stat-xp').textContent = userData.total_xp_gained ?? 0;
+                        document.getElementById('stat-damage-dealt').textContent = userData.total_damage_dealt ?? 0;
+                        document.getElementById('stat-damage-taken').textContent = userData.total_damage_taken ?? 0;
+                        document.getElementById('stat-deaths').textContent = userData.total_deaths ?? 0;
+                        document.getElementById('stat-game-time').textContent = formatGameTime(userData.total_game_time);
 
                     profileLoaded = true;
                 } catch (err) {
@@ -166,3 +169,19 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+function formatGameTime(totalSeconds) {
+    if (!totalSeconds || totalSeconds <= 0) return '0s';
+
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+
+    const parts = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+
+    return parts.join(' ');
+}
