@@ -4,6 +4,7 @@ import (
 	"log"
 	"math"
 	"time"
+	"unicode"
 )
 
 type Player struct {
@@ -108,7 +109,7 @@ func (player *Player) UpdatePlayer(game *Game) {
 	keyPresses := player.KeyQueue
 	if player.PlayerState == StatePlaying {
 		for _, key := range keyPresses {
-			if function, exists := player.KeyBindings[key]; exists {
+			if function, exists := player.KeyBindings[unicode.ToLower(key)]; exists {
 				function(game)
 			}
 		}
