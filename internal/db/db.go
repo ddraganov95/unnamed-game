@@ -2,18 +2,23 @@ package db
 
 import (
 	"context"
+	"embed"
 	_ "embed"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-//go:embed schema.sql
-var schemaSQL string
+//go:embed all:schema
+var schemaFS embed.FS
 
 type Database struct {
 	Pool *pgxpool.Pool
@@ -53,17 +58,48 @@ func NewDatabase() (*Database, error) {
 		pool.Close()
 		return nil, fmt.Errorf("database ping failed: %w", err)
 	}
-	log.Printf("[DB DEBUG] Executing schema SQL length: %d bytes", len(schemaSQL))
-	// Execute embedded schema SQL directly
-	if _, err := pool.Exec(ctx, schemaSQL); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("failed to execute schema.sql: %w", err)
+	if err := InitSchema(ctx, pool); err != nil {
+		return nil, err
 	}
-
 	log.Println("[DB] Successfully connected and updated USERS table schema.")
 	return &Database{Pool: pool}, nil
 }
+func InitSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin schema transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
 
+	// fs.WalkDir processes directories and files in lexical (alphabetical) order
+	err = fs.WalkDir(schemaFS, "schema", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories and any non-SQL files
+		if d.IsDir() || filepath.Ext(path) != ".sql" {
+			return nil
+		}
+
+		sqlBytes, err := schemaFS.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read embedded file %s: %w", path, err)
+		}
+
+		if _, err := tx.Exec(ctx, string(sqlBytes)); err != nil {
+			return fmt.Errorf("failed executing %s: %w", path, err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
 func LoadConfig() DBConfig {
 	return DBConfig{
 		Host:           getEnv("DB_HOST", "localhost"),
@@ -98,4 +134,53 @@ func (c DBConfig) ConnString() string {
 	u.RawQuery = q.Encode()
 
 	return u.String()
+}
+
+// CallProcedure executes any PostgreSQL stored procedure with variadic arguments using pgx pool.
+func (db *Database) CallProcedure(ctx context.Context, name string, args ...any) error {
+	placeholders := make([]string, len(args))
+	for i := range args {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+
+	query := fmt.Sprintf("CALL %s(%s);", name, strings.Join(placeholders, ", "))
+
+	// Use db.Pool.Exec (pgx standard) instead of ExecContext
+	_, err := db.Pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("procedure call failed (%s): %w", name, err)
+	}
+
+	return nil
+}
+func (db *Database) QueryOne[T any](ctx context.Context, name string, args ...any) (T, error) {
+	var result T
+	placeholders := make([]string, len(args))
+	for i := range args {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+
+	query := fmt.Sprintf("SELECT * FROM %s(%s);", name, strings.Join(placeholders, ", "))
+
+	rows, err := db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return result, fmt.Errorf("query failed (%s): %w", name, err)
+	}
+	defer rows.Close()
+
+	result, err = ScanSingleRow[T](rows)
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+func ScanSingleRow[T any](rows pgx.Rows) (T, error) {
+	var result T
+	result, err := pgx.CollectOneRow(rows, pgx.RowToStructByNameLax[T])
+	if err != nil {
+		log.Printf("[DB SCAN ERROR DETAILS]: %v", err)
+		return result, fmt.Errorf("failed to scan row: %w", err)
+	}
+	return result, nil
 }

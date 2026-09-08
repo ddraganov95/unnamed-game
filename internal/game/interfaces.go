@@ -53,4 +53,5 @@ type GenericEnemy interface {
 	SetDirection(Direction)
 	DistributeXp(game *Game)
 	CheckDeath(game *Game)
+	GetType() string
 }

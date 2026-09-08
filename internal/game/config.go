@@ -2,12 +2,16 @@ package game
 
 //Log Constants
 const (
-	LogInfo    = "[*]"
-	LogSuccess = "[+]"
-	LogWarn    = "[!]"
-	LogError   = "[-]"
-	LogDebug   = "[?]"
-	ChatCursor = "[Say]"
+	LogInfo                      = "[*]"
+	LogSuccess                   = "[+]"
+	LogWarn                      = "[!]"
+	LogError                     = "[-]"
+	LogDebug                     = "[?]"
+	ChatCursorDefault            = "[Say]"
+	ChatCursorGameChat           = "[Game]"
+	ChatCursorGlobalChat         = "[Global]"
+	ChatChannelDisplayGameChat   = "[1]"
+	ChatChannelDisplayGlobalChat = "[2]"
 )
 
 // Elements to Draw
@@ -87,19 +91,20 @@ const (
 
 // Display Constants
 const (
-	MaxScreenWidth    = 200
-	MaxScreenHeight   = 55
-	MaxMessageLength  = 50
-	MaxEventsLength   = 50
-	MaxChatHistory    = 50
-	SidebarWidth      = 2
-	HorizontalPadding = 1
-	VerticalPadding   = 1
+	MaxScreenWidth       = 250
+	MaxScreenHeight      = 55
+	MaxMessageLength     = 70 //EVENTS MESSAGE LENGTH
+	MaxEventsLength      = 50 //EVENTS HISTORY LENGTH
+	MaxChatHistory       = 50
+	MaxChatMessageLength = 70
+	SidebarWidth         = 2
+	HorizontalPadding    = 1
+	VerticalPadding      = 1
 )
 
 // Game Constants
 const (
 	InputBufferPerPlayer     = 10
-	StopGameAfterIdleMinutes = 5
-	PlayerAllowedAFKMins     = 10
+	StopGameAfterIdleMinutes = 3
+	PlayerAllowedAFKMins     = 2
 )

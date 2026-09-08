@@ -13,16 +13,17 @@ type Player struct {
 	Experience
 	Direction
 	PlayerSessionSummary
-	KeyBindings        map[rune]func(g *Game)
-	TypingKeyBindings  map[rune]func(g *Game)
-	DisplayChan        chan string
-	KeyQueue           []rune
-	UnlockedAttacks    []Attack
-	LastDamageRecieved Damage
-	PlayerState        PlayerState
-	AFKMinutes         int
-	MessageBuffer      string
-	EquippedAttack     int
+	KeyBindings         map[rune]func(g *Game)
+	TypingKeyBindings   map[rune]func(g *Game)
+	DisplayChan         chan string
+	KeyQueue            []rune
+	UnlockedAttacks     []Attack
+	LastDamageRecieved  Damage
+	PlayerState         PlayerState
+	PlayerTypingChannel PlayerTypingChannel
+	AFKMinutes          int
+	MessageBuffer       string
+	EquippedAttack      int
 }
 type PlayerState int
 
@@ -30,6 +31,13 @@ const (
 	StatePlaying PlayerState = iota
 	StateTyping
 	StateDisconnected
+)
+
+type PlayerTypingChannel int
+
+const (
+	StateTypingGameChat PlayerTypingChannel = iota
+	StateTypingGlobalChat
 )
 
 func (s PlayerState) String() string {
@@ -121,7 +129,7 @@ func (player *Player) UpdatePlayer(game *Game) {
 			if function, exists := player.TypingKeyBindings[key]; exists {
 				function(game)
 			} else {
-				player.MessageBuffer += string(key)
+				player.AddToMessageBuffer(key)
 			}
 		}
 	}
@@ -138,11 +146,12 @@ func NewPlayer(id string) *Player {
 		ID:            id,
 		CurrentHealth: 100, MaxHealth: 100,
 		X: 0, Y: 0,
-		EquippedAttack: AttackBasic,
-		PlayerState:    StatePlaying,
-		DisplayChan:    make(chan string, 100),
-		PlayerID:       id,
-		SessionStart:   time.Now(),
+		EquippedAttack:      AttackBasic,
+		PlayerState:         StatePlaying,
+		PlayerTypingChannel: StateTypingGameChat,
+		DisplayChan:         make(chan string, 100),
+		PlayerID:            id,
+		SessionStart:        time.Now(),
 	}
 	player.Experience = Experience{Level: 1, ExperienceVal: 0}
 	player.UnlockAttacks()

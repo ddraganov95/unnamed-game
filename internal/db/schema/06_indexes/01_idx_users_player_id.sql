@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_users_player_id ON users(player_id);

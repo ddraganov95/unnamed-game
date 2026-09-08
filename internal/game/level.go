@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"math/rand"
+	"time"
 )
 
 type Size struct {
@@ -17,6 +18,7 @@ type Level struct {
 	PlayerSpawnPoints []Position
 	EnemySpawnPoints  []Position
 	Floor             [][]rune
+	CreatedAt         time.Time
 }
 type Zone struct {
 	Entity
@@ -85,7 +87,9 @@ func PrepareLevel() *Level {
 	return &Level{
 		Entities:    make(map[string]GameObject),
 		posEntities: make(map[Position][]GameObject),
-		Effects:     make(map[string]Effect)}
+		Effects:     make(map[string]Effect),
+		CreatedAt:   time.Now(),
+	}
 }
 func (level *Level) InitializeField() {
 	X, Y := level.GetSize()
@@ -297,6 +301,12 @@ func (level *Level) Update(game *Game) {
 		for _, player := range game.GetActivePlayers() {
 			player.LevelsCompleted++
 		}
+		elapsedSeconds := int64(time.Since(level.CreatedAt).Seconds())
+		game.AchievementEngine.PublishEvent(AchievementEvent{
+			PlayerIDs: game.GetActiveAndAlivePlayerID(),
+			Key:       "TIME:level_speedrun",
+			Amount:    elapsedSeconds,
+		})
 		game.State = StateGameIntermission
 	}
 }

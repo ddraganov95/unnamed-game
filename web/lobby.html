@@ -35,6 +35,7 @@
         <div class="tab-navigation">
             <button type="button" class="tab-btn active" data-tab="tab-chat">CHAT</button>
             <button type="button" class="tab-btn" data-tab="tab-profile">PROFILE</button>
+            <button type="button" class="tab-btn" data-tab="tab-achievements">ACHIEVEMENTS</button>
         </div>
 
         <!-- Tab Content Wrapper -->
@@ -44,13 +45,20 @@
                 <div id="chat-box" class="chat-box"></div>
                 
                 <div class="join-row">
-                    <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                    <input type="text" id="chat-input" maxlength="70" placeholder="Type a message..." autocomplete="off">
                     <button id="btn-send-chat" type="button">Send</button>
                 </div>
             </div>
-
-            <!-- PROFILE TAB (Empty wrapper for profile.html) -->
+ 
+            <!-- PROFILE TAB -->
             <div id="tab-profile" class="tab-content"></div>
+
+            <!-- ACHIEVEMENTS TAB -->
+            <div id="tab-achievements" class="tab-content">
+                <div id="achievements-grid" class="achievements-grid">
+                    <!-- Dynamically populated or template cards -->
+                </div>
+            </div>
         </div>
     </div>
 

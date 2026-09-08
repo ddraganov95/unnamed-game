@@ -47,3 +47,17 @@ const (
 	WHERE player_id = $1;
 	`
 )
+const GetPlayerFullAchievementState = `
+    SELECT 
+        a.achievement_id,
+        a.code,
+        a.requirements,
+        CASE WHEN pa.achievement_id IS NOT NULL THEN true ELSE false END AS is_unlocked,
+        COALESCE(pap.current_progress, '{}'::jsonb) AS progress
+    FROM achievements a
+    LEFT JOIN player_achievements pa 
+        ON a.achievement_id = pa.achievement_id AND pa.user_id = $1
+    LEFT JOIN player_achievements_progress pap 
+        ON a.achievement_id = pap.achievement_id AND pap.user_id = $1;
+`
+const GetAchievementCatalog = `SELECT achievement_id, code, title, description, requirements, is_global_announcement FROM achievements;`

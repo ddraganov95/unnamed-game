@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     //Wipe stale cache as soon as the login page opens
     localStorage.removeItem('user_stats');
+    localStorage.removeItem('user_achievements');
 
     const submitBtn = document.getElementById('submit-btn');
     const usernameInput = document.getElementById('username');
@@ -42,6 +43,7 @@ async function submitName(playerName) {
 
         //Ensure local cache is clean before redirecting
         localStorage.removeItem('user_stats');
+        localStorage.removeItem('user_achievements');
 
         const data = await res.json();
         if (data.redirect) {

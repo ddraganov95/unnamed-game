@@ -10,20 +10,23 @@ import (
 )
 
 type Game struct {
-	Level           Level
-	Events          []Event
-	Frame           [][]rune
-	GlobalChat      chan string
-	EventChan       chan GameEvent   //Channel so server sends info to the game
-	ServerEventChan chan ServerEvent //Channel so that game can send info to the server
-	DestroyChan     chan struct{}
-	ChatHistory     []string
-	Players         []*Player
-	Mu              sync.RWMutex
-	State           GameState
-	EmptyMinutes    int
-	LevelNumber     int
-	GameId          uuid.UUID
+	Level Level
+
+	Events            []Event
+	Frame             [][]rune
+	GlobalChat        chan string
+	GameChat          chan string      //Chat channel for the game instance
+	EventChan         chan GameEvent   //Channel so server sends info to the game
+	ServerEventChan   chan ServerEvent //Channel so that game can send info to the server
+	DestroyChan       chan struct{}
+	ChatHistory       []string
+	Players           []*Player
+	Mu                sync.RWMutex
+	State             GameState
+	EmptyMinutes      int
+	LevelNumber       int
+	GameId            uuid.UUID
+	AchievementEngine *AchievementEngine
 }
 type GameState int
 
@@ -39,12 +42,23 @@ func InitializeGame() *Game {
 	game := &Game{
 		State:       StateGamePlaying,
 		DestroyChan: make(chan struct{}),
+		GameChat:    make(chan string, MaxChatHistory),
 	}
 	game.InitFrame()
 	InitAttacks()
 	InitSpawnRules()
 	InitEventChan(game)
 	NewLevel(game)
+	return game
+}
+func NewGame(gameId uuid.UUID, globalChat chan string, achievementCatalog *AchievementCatalog) *Game {
+	game := InitializeGame()
+	game.GlobalChat = globalChat
+	game.GameId = gameId
+	game.AchievementEngine = NewAchievementEngine(achievementCatalog, game.DestroyChan, game.ServerEventChan)
+	go StartGame(game)       // Start the game loop
+	go HandleEmptyGame(game) //Ticks ever 1 min to see if theres activity.
+	go game.AchievementEngine.StartEventProcessor()
 	return game
 }
 func StartGame(game *Game) {
@@ -60,7 +74,7 @@ func StartGame(game *Game) {
 			//log.Println("[DEBUG] game loop start")
 			game.Mu.Lock()
 			game.ProcessInputs()
-			game.PollGlobalChat()
+			game.PollChat()
 			for _, player := range game.GetActivePlayers() {
 				player.UpdatePlayer(game)
 			}
@@ -186,17 +200,22 @@ func (game *Game) InitFrame() {
 		game.Frame[row] = make([]rune, MaxScreenWidth)
 	}
 }
-func (game *Game) PollGlobalChat() {
+func (game *Game) PollChat() {
 	for {
 		select {
 		case msg := <-game.GlobalChat:
-			game.ChatHistory = append(game.ChatHistory, msg)
-			if len(game.ChatHistory) > MaxChatHistory {
-				game.ChatHistory = game.ChatHistory[1:]
-			}
+			game.appendChat(fmt.Sprintf("%s%s", ChatChannelDisplayGlobalChat, msg))
+		case msg := <-game.GameChat:
+			game.appendChat(fmt.Sprintf("%s%s", ChatChannelDisplayGameChat, msg))
 		default:
 			return
 		}
+	}
+}
+func (game *Game) appendChat(msg string) {
+	game.ChatHistory = append(game.ChatHistory, msg)
+	if len(game.ChatHistory) > MaxChatHistory {
+		game.ChatHistory = game.ChatHistory[1:]
 	}
 }
 func (game *Game) ClearFrame() {
@@ -260,7 +279,7 @@ func (game *Game) DrawGlobalChatPanel(level Level, player *Player) {
 	if player != nil && player.PlayerState == StateTyping {
 		typingRow := VerticalPadding + len(game.ChatHistory) + 1
 		if typingRow < MaxScreenHeight {
-			prompt := fmt.Sprintf("%s: %s_", ChatCursor, player.MessageBuffer)
+			prompt := fmt.Sprintf("%s: %s_", player.GetCursor(), player.MessageBuffer)
 			for colIdx, ch := range prompt {
 				targetCol := chatStartCol + colIdx
 				if targetCol < MaxScreenWidth {
@@ -344,14 +363,6 @@ func UpdateMap[T any](m map[string]T, game *Game) {
 		}
 	}
 }
-func NewGame(gameId uuid.UUID, globalChat chan string) *Game {
-	game := InitializeGame()
-	game.GlobalChat = globalChat
-	game.GameId = gameId
-	go StartGame(game)       // Start the game loop
-	go HandleEmptyGame(game) //Ticks ever 1 min to see if theres activity.
-	return game
-}
 func InitEventChan(game *Game) {
 	evntChan := make(chan GameEvent, InputBufferPerPlayer*MaxPlayerCount)
 	game.EventChan = evntChan
@@ -384,6 +395,15 @@ func (g *Game) GetActivePlayers() []*Player {
 	for _, p := range g.Players {
 		if p.PlayerState != StateDisconnected {
 			active = append(active, p)
+		}
+	}
+	return active
+}
+func (g *Game) GetActiveAndAlivePlayerID() []string {
+	var active []string
+	for _, p := range g.Players {
+		if p.PlayerState != StateDisconnected && p.IsAlive() {
+			active = append(active, p.GetID())
 		}
 	}
 	return active
@@ -465,6 +485,11 @@ func HandleEmptyGame(game *Game) {
 				p.AFKMinutes++
 				log.Printf("[DEBUG] Player %s afk for %d minute(s)", p.GetID(), p.AFKMinutes)
 				if p.AFKMinutes >= PlayerAllowedAFKMins {
+					game.AchievementEngine.PublishEvent(AchievementEvent{
+						PlayerIDs: game.GetActiveAndAlivePlayerID(),
+						Key:       "GAME:default",
+						Amount:    0,
+					})
 					game.HandlePlayerDisconnect(p.GetID())
 				}
 			}
@@ -472,6 +497,11 @@ func HandleEmptyGame(game *Game) {
 				game.EmptyMinutes++
 				log.Printf("[DEBUG] Game empty for %d minute(s)", game.EmptyMinutes)
 				game.CreateLog("[SERVER] Game ending in %d minute(s)", StopGameAfterIdleMinutes-game.EmptyMinutes)
+				game.AchievementEngine.PublishEvent(AchievementEvent{
+					PlayerIDs: game.GetActiveAndAlivePlayerID(),
+					Key:       "GAME:default",
+					Amount:    0,
+				})
 				if game.EmptyMinutes >= StopGameAfterIdleMinutes {
 					log.Println("[DEBUG] Idle threshold reached via ticker. Shutting down game.")
 					game.Mu.Unlock()
