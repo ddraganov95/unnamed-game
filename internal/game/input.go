@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"log"
+	"strings"
 )
 
 type EventType int
@@ -15,6 +16,8 @@ const (
 	EventTypeIdleCheck
 	EventTypeCopyGame
 	EventTypeGlobalChatMsg
+	EventTypeGameChatMsg
+	EventTypeAchievementUnlocked
 )
 
 type GameEvent struct {
@@ -28,6 +31,7 @@ type ServerEvent struct {
 	PlayerID string
 	Value    string
 	RespChan chan error
+	Object   any
 }
 
 func (player *Player) EnqueueKey(r rune) {
@@ -54,9 +58,15 @@ func (player *Player) InitTypingKeybindings() {
 		'\r': player.ChangeTypeState,
 		'\b': player.RemoveLastByteMessage,
 		127:  player.RemoveLastByteMessage,
+		' ':  player.ChangePlayerTypingChannel,
 	}
 }
 func (player *Player) QuitGame(game *Game) {
+	game.AchievementEngine.PublishEvent(AchievementEvent{
+		PlayerIDs: []string{player.GetID()},
+		Key:       "GAME:default",
+		Amount:    0,
+	})
 	game.EventChan <- GameEvent{
 		Type:     EventTypeDisconnect,
 		PlayerID: player.GetID(),
@@ -90,6 +100,29 @@ func (player *Player) ChangeTypeState(game *Game) {
 	}
 	player.PlayerState = StateTyping
 }
+func (player *Player) ChangePlayerTypingChannel(game *Game) {
+	if strings.HasPrefix(player.MessageBuffer, "/1") {
+		player.PlayerTypingChannel = StateTypingGameChat
+		player.MessageBuffer = strings.TrimPrefix(player.MessageBuffer, "/1")
+		return
+	}
+	if strings.HasPrefix(player.MessageBuffer, "/2") {
+		player.PlayerTypingChannel = StateTypingGlobalChat
+		player.MessageBuffer = strings.TrimPrefix(player.MessageBuffer, "/2")
+		return
+	}
+	player.AddToMessageBuffer(' ')
+}
+func (player *Player) GetCursor() string {
+	switch player.PlayerTypingChannel {
+	case StateTypingGameChat:
+		return ChatCursorGameChat
+	case StateTypingGlobalChat:
+		return ChatCursorGlobalChat
+	default:
+		return ChatCursorDefault
+	}
+}
 func (player *Player) RemoveLastByteMessage(game *Game) {
 	if len(player.MessageBuffer) > 0 {
 		player.MessageBuffer = player.MessageBuffer[:len(player.MessageBuffer)-1]
@@ -97,14 +130,35 @@ func (player *Player) RemoveLastByteMessage(game *Game) {
 }
 func (player *Player) SendMessage(game *Game) {
 	if len(player.MessageBuffer) > 0 {
-		game.ServerEventChan <- ServerEvent{
-			Type:     EventTypeGlobalChatMsg,
-			PlayerID: player.GetID(),
-			Value:    player.MessageBuffer}
+		if player.PlayerTypingChannel == StateTypingGameChat {
+			game.ServerEventChan <- ServerEvent{
+				Type:     EventTypeGameChatMsg,
+				PlayerID: player.GetID(),
+				Value:    player.MessageBuffer}
+		}
+		if player.PlayerTypingChannel == StateTypingGlobalChat {
+			game.ServerEventChan <- ServerEvent{
+				Type:     EventTypeGlobalChatMsg,
+				PlayerID: player.GetID(),
+				Value:    player.MessageBuffer}
+		}
 		player.MessageBuffer = ""
 	}
 }
-
+func (player *Player) AddToMessageBuffer(key rune) {
+	maxAllowedLength := MaxChatMessageLength - 5
+	if len(player.MessageBuffer) < maxAllowedLength {
+		player.MessageBuffer += string(key)
+	}
+}
+func (game *Game) BroadcastGameChat(playerid string, message string) {
+	msg := fmt.Sprintf("[%s]: %s", playerid, message)
+	log.Println(msg)
+	select {
+	case game.GameChat <- msg:
+	default:
+	}
+}
 func (game *Game) ProcessInputs() {
 EventLoop:
 	for {

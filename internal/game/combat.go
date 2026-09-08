@@ -2,7 +2,6 @@ package game
 
 import (
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -204,9 +203,9 @@ func (projectile *Projectile) Update(game *Game) {
 
 	// Check attackable entities
 	if attackable, exists := game.Level.GetAttackableAt(newPos); exists {
-		log.Println("projectile found attackable")
+		//log.Println("projectile found attackable")
 		if projectile.IsEnemy != attackable.IsEnemy() {
-			log.Printf("%s got hit by projectile %s sent by %s", attackable.GetID(), projectile.GetID(), projectile.SenderID)
+			//log.Printf("%s got hit by projectile %s sent by %s", attackable.GetID(), projectile.GetID(), projectile.SenderID)
 			game.DealDamage(*projectile.Attack, attackable)
 			game.Level.RemoveEntity(projectile)
 		}
@@ -216,7 +215,7 @@ func (projectile *Projectile) Update(game *Game) {
 
 	// Check blockers
 	if _, blocked := game.Level.GetBlockerAt(newPos); blocked {
-		log.Println("projectile blocked")
+		//log.Println("projectile blocked")
 		game.Level.RemoveEntity(projectile)
 		return
 	}

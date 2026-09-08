@@ -2,12 +2,14 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"uuid"
+	"strings"
 
 	"unnamed-game/internal/game"
+	"uuid"
 
 	"github.com/gorilla/websocket"
 )
@@ -20,18 +22,23 @@ func (server *Server) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	cookie, err := r.Cookie("player_session")
+	userIDStr, playerID, err := ExtractSessionIDs(r)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	playerID := cookie.Value
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format in session", http.StatusUnauthorized)
+		return
+	}
 
 	server.mu.Lock()
 	defer server.mu.Unlock()
 
 	targetGameID := uuid.NewV7()
-	targetGame := game.NewGame(targetGameID, server.globalChat)
+	targetGame := game.NewGame(targetGameID, server.globalChat, server.achievementCat)
 
 	if err := targetGame.Validate(); err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -44,6 +51,12 @@ func (server *Server) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 
 	server.AddPlayerIdToGame(playerID, targetGame)
 	log.Printf("added %s to game: %s", playerID, targetGame.GameId)
+
+	// Add joining player's achievement progress in this room
+	progress, err := server.db.FetchPlayerProgress(r.Context(), userID)
+	if err == nil {
+		targetGame.AchievementEngine.LoadPlayerAchievements(playerID, progress)
+	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(GameResponse{
@@ -59,15 +72,18 @@ func (server *Server) HandleJoinGame(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	//Retrieve session identity directly from cookie
-	cookie, err := r.Cookie("player_session")
+	userIDStr, playerID, err := ExtractSessionIDs(r)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	playerID := cookie.Value
 
-	//Extract game ID from URL path parameters
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format in session", http.StatusUnauthorized)
+		return
+	}
+
 	parsedID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		http.Error(w, "Invalid game ID format", http.StatusBadRequest)
@@ -88,8 +104,13 @@ func (server *Server) HandleJoinGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//Attach validated cookie identity to target game room
 	server.AddPlayerIdToGame(playerID, targetGame)
+
+	// Add joining player's achievement progress in this room
+	progress, err := server.db.FetchPlayerProgress(r.Context(), userID)
+	if err == nil {
+		targetGame.AchievementEngine.LoadPlayerAchievements(playerID, progress)
+	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(GameResponse{
@@ -98,13 +119,16 @@ func (server *Server) HandleJoinGame(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("player_session")
+	userID, playerID, err := ExtractSessionIDs(r)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	playerID := cookie.Value
-
+	server.playerUsers[playerID], err = uuid.Parse(userID)
+	if err != nil {
+		http.Error(w, "Invalid user ID format in session", http.StatusUnauthorized)
+		return
+	}
 	g, ok := server.FindGameByPlayerId(playerID)
 	if !ok {
 		log.Printf("[ERROR] Cannot find game for %s", playerID)
@@ -130,16 +154,14 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	go server.streamFrames(g, playerID, conn)
 	fmt.Printf("Player %s connected and spawned!\n", playerID)
 	server.readPlayerInputs(g, playerID, conn)
-
 }
 
 func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("player_session")
+	_, playerID, err := ExtractSessionIDs(r)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	playerID := cookie.Value
 
 	conn, err := server.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -175,6 +197,7 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 }
+
 func (server *Server) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -189,26 +212,30 @@ func (server *Server) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := server.db.GetOrCreateUser(r.Context(), req.PlayerID)
+	user, err := server.db.UpsertUser(r.Context(), req.PlayerID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	cookieValue := fmt.Sprintf("%s:%s", user.UserID, user.PlayerID)
+	server.playerUsers[req.PlayerID] = user.UserID
+	log.Printf("[DB] Successfully saved %s player with UUID %s", req.PlayerID, user.UserID)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "player_session",
-		Value:    user.PlayerID, // Store the PLAYER ID
+		Value:    cookieValue, // "user-uuid:player-id"
 		Path:     "/",
-		HttpOnly: true,                 // Blocks JavaScript access (XSS defense)
-		SameSite: http.SameSiteLaxMode, // Prevents CSRF on cross-site requests
-		MaxAge:   86400,                // 24 hours in seconds
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   86400,
 	})
 
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":   "ok",
-		"redirect": "/lobby.html"})
+		"redirect": "/lobby.html",
+	})
 }
+
 func (server *Server) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -218,13 +245,13 @@ func (server *Server) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := r.Cookie("player_session")
+	_, _, err := ExtractSessionIDs(r)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	user, err := server.db.GetUserSummary(r.Context(), targetPlayerID)
+	user, err := server.db.FetchUserSummary(r.Context(), targetPlayerID)
 	if err != nil {
 		http.Error(w, "Player not found", http.StatusNotFound)
 		return
@@ -232,17 +259,17 @@ func (server *Server) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(user)
 }
+
 func (server *Server) HandleGetSelf(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	cookie, err := r.Cookie("player_session")
-	if err != nil || cookie.Value == "" {
+	_, playerID, err := ExtractSessionIDs(r)
+	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	playerID := cookie.Value
 
-	user, err := server.db.GetUserSummary(r.Context(), playerID)
+	user, err := server.db.FetchUserSummary(r.Context(), playerID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -252,4 +279,48 @@ func (server *Server) HandleGetSelf(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to encode user data", http.StatusInternalServerError)
 		return
 	}
+	server.playerUsers[playerID] = user.UserID
+	log.Printf("[DB] Successfully saved %s player with UUID %s", playerID, user.UserID)
+}
+func (server *Server) HandleGetSelfAchievements(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	userIDStr, playerID, err := ExtractSessionIDs(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+		return
+	}
+
+	achievements, err := server.db.FetchPlayerProgress(r.Context(), userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := json.NewEncoder(w).Encode(achievements); err != nil {
+		http.Error(w, "Failed to encode achievements data", http.StatusInternalServerError)
+		return
+	}
+
+	server.playerUsers[playerID] = userID
+	log.Printf("[DB] Successfully fetched achievements for player with UUID %s", userID.String())
+}
+func ExtractSessionIDs(r *http.Request) (userID, playerID string, err error) {
+	cookie, err := r.Cookie("player_session")
+	if err != nil {
+		return "", "", err
+	}
+
+	parts := strings.Split(cookie.Value, ":")
+	if len(parts) != 2 {
+		return "", "", errors.New("invalid session cookie format")
+	}
+
+	return parts[0], parts[1], nil
 }

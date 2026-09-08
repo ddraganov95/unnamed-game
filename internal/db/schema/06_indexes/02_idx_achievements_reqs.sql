@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_achievements_reqs ON achievements USING GIN (requirements);  

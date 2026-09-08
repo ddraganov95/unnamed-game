@@ -2,7 +2,7 @@
     const term = new Terminal({
         cursorBlink: true,
         rows: 60,
-        cols: 200,
+        cols: 250,
     });
 
     // Open terminal inside HTML container
@@ -48,6 +48,12 @@
             if (userData) {
                 localStorage.setItem('user_stats', JSON.stringify(userData));
             }
+            
+            // Cache achievements if sent by the backend
+            if (data.achievements) {
+                localStorage.setItem('user_achievements', JSON.stringify(data.achievements));
+            }
+
             window.location.href = "/lobby.html";
             return; // Prevent rendering JSON payload inside xterm
         }

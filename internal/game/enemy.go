@@ -2,7 +2,6 @@ package game
 
 import (
 	"fmt"
-	"log"
 	"math"
 )
 
@@ -16,7 +15,16 @@ type Enemy struct {
 	DamageMultiplier   float64
 	EquippedAttack     int
 	AggroRange         int
+	EnemyType          EnemyType
 }
+type EnemyType uint8
+
+const (
+	EnemyUnknown EnemyType = iota
+	EnemyGoblin
+	EnemyArcher
+)
+
 type Goblin struct {
 	Enemy
 }
@@ -59,17 +67,27 @@ func (enemy *Enemy) IsAlive() bool {
 func (enemy *Enemy) GetLastDamageTakenFrom() string {
 	return enemy.LastDamageRecieved.EntityID
 }
-func CreateEnemy(id string, pos Position, health Health) Enemy {
+func CreateEnemy(id string, pos Position, health Health, kind EnemyType) Enemy {
 	return Enemy{
 		Entity:     CreateEntity(id, pos),
 		Health:     health,
 		AggroRange: EnemyDefaultAggroRange,
+		EnemyType:  kind,
 	}
 }
 func (enemy *Enemy) Update(game *Game) {
 	UpdateEnemy(game, enemy)
 }
-
+func (t EnemyType) String() string {
+	switch t {
+	case EnemyGoblin:
+		return "goblin"
+	case EnemyArcher:
+		return "archer"
+	default:
+		return "unknown"
+	}
+}
 func (goblin *Goblin) Update(game *Game) {
 	UpdateEnemy(game, goblin)
 }
@@ -82,10 +100,20 @@ func (goblin *Goblin) GetSymbol() rune {
 func (archer *Archer) GetSymbol() rune {
 	return SymbolArcher
 }
+func (goblin *Goblin) GetType() string {
+	return "goblin"
+}
+
+func (archer *Archer) GetType() string {
+	return "archer"
+}
+func (enemy *Enemy) GetType() string {
+	return "enemy"
+}
 func CreateArcher(countArcher int, pos Position) GameObject {
 	id := fmt.Sprintf("Archer %d", countArcher)
 	archer := &Archer{
-		Enemy: CreateEnemy(id, pos, CreateHealth(50)),
+		Enemy: CreateEnemy(id, pos, CreateHealth(50), EnemyArcher),
 	}
 	archer.ExperienceVal = ArcherDefaultExperience
 	archer.EquippedAttack = AttackArrow
@@ -95,7 +123,7 @@ func CreateArcher(countArcher int, pos Position) GameObject {
 func CreateGoblin(countGoblin int, pos Position) GameObject {
 	id := fmt.Sprintf("Goblin %d", countGoblin)
 	goblin := &Goblin{
-		Enemy: CreateEnemy(id, pos, CreateHealth(200)),
+		Enemy: CreateEnemy(id, pos, CreateHealth(200), EnemyGoblin),
 	}
 	goblin.ExperienceVal = GoblinDefaultExperience
 	goblin.EquippedAttack = AttackBasic
@@ -144,7 +172,7 @@ func (archer *Archer) GetDamageMultiplierPercent() int {
 	return EnemyDefaultDamageMultipier - 30
 }
 func (archer *Archer) GetProjectileSpeed() int {
-	log.Println("[DEBUG] Archer Projectile")
+	//log.Println("[DEBUG] Archer Projectile")
 	return ProjectileDefaultTravelSpeed * 15
 }
 func (enemy *Enemy) SetSpeed(moveSpeed int, attackSpeed int) {
@@ -228,7 +256,7 @@ func (enemy *Enemy) IsEnemy() bool {
 	return true
 }
 func (enemy *Enemy) GetProjectileSpeed() int {
-	log.Println("[DEBUG] Enemy Projectile")
+	//log.Println("[DEBUG] Enemy Projectile")
 	return ProjectileDefaultTravelSpeed
 }
 func UpdateEnemy(game *Game, enemy GenericEnemy) {
@@ -385,6 +413,11 @@ func (enemy *Enemy) CheckDeath(game *Game) {
 		if player, ok := game.GetPlayerByID(killer); ok {
 			player.EnemiesKilled++
 		}
+		game.AchievementEngine.PublishEvent(AchievementEvent{
+			PlayerIDs: game.GetActiveAndAlivePlayerID(),
+			Key:       fmt.Sprintf("KILL:%s", enemy.EnemyType), // Produces "KILL:goblin", "KILL:archer", etc.
+			Amount:    1,
+		})
 		game.CreateLog("%s %s killed %s", LogSuccess, killer, enemy.GetID())
 		enemy.DistributeXp(game)
 		game.Level.RemoveEntity(enemy)
