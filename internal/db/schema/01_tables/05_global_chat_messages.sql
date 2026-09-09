@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS global_chat_messages(
+    message_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    message VARCHAR(70) NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

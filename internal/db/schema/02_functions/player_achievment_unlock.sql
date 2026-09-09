@@ -1,4 +1,5 @@
-CREATE OR REPLACE PROCEDURE player_achievement_unlock(p_user_id UUID,p_achievement_id UUID)
+CREATE OR REPLACE FUNCTION player_achievement_unlock(p_user_id UUID,p_achievement_id UUID)
+RETURNS VOID
 LANGUAGE plpgsql
 AS $$
 BEGIN

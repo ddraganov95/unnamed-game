@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_global_chat_created_at ON global_chat_messages (created_at DESC);

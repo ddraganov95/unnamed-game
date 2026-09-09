@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -148,12 +149,19 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-
-	if err := server.RegisterPlayer(g, playerID, conn); err != nil {
+	ctx, cancel := context.WithCancel(r.Context())
+	newConnection := &WSConnection{
+		Conn:     conn,
+		Ctx:      ctx,
+		Cancel:   cancel,
+		UserID:   userID,
+		PlayerID: playerID,
+	}
+	if err := server.RegisterPlayer(g, playerID, newConnection); err != nil {
 		conn.Close()
 		return
 	}
-	defer server.DisconnectPlayer(g, playerID, conn)
+	defer server.DisconnectPlayer(g, playerID, newConnection)
 
 	go server.streamFrames(g, playerID, conn)
 	fmt.Printf("Player %s connected and spawned!\n", playerID)
@@ -197,7 +205,7 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 		}
 
 		if len(msg) > 0 {
-			server.BroadcastGlobalChat(playerID, string(msg))
+			server.SendGlobalChatToDB(r.Context(), playerID, string(msg))
 		}
 	}
 }

@@ -150,6 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const data = await response.json();
             renderLeaderboardPayload(data);
+            currentLeaderboardPage = data.CurrentPage;
         } catch (err) {
             console.error("[Leaderboard Load Error]:", err);
             const tbody = document.getElementById('leaderboard-tbody');
