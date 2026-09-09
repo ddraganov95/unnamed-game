@@ -52,8 +52,10 @@ func CreateHealth(maxHealth int) Health {
 }
 func (player *Player) GenerateSummary() PlayerSessionSummary {
 	deaths := 0
+	score := player.Score
 	if !player.IsAlive() {
 		deaths = 1
+		score = 0
 	}
 	return PlayerSessionSummary{
 		GameID:          player.GameID,
@@ -67,7 +69,7 @@ func (player *Player) GenerateSummary() PlayerSessionSummary {
 		DamageTaken:     player.DamageTaken,
 		PlayerLevel:     player.Level,
 		Deaths:          deaths,
-		Score:           player.Score,
+		Score:           score,
 	}
 }
 func GetSummaryLines(summary PlayerSessionSummary) []string {
