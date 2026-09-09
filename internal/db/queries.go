@@ -61,3 +61,38 @@ const GetPlayerFullAchievementState = `
         ON a.achievement_id = pap.achievement_id AND pap.user_id = $1;
 `
 const GetAchievementCatalog = `SELECT achievement_id, code, title, description, requirements, is_global_announcement FROM achievements;`
+
+const GetUserLeaderboardPage = `
+WITH ranked_users AS (
+    SELECT 
+        user_id,
+        player_id, 
+        highest_score, 
+        created_at,
+        ROW_NUMBER() OVER (ORDER BY highest_score DESC, created_at ASC)::INT AS rank
+    FROM users
+),
+target_user AS (
+    SELECT rank FROM ranked_users WHERE user_id = $1
+)
+SELECT 
+    r.user_id,
+    r.player_id,
+    r.highest_score,
+    r.rank
+FROM ranked_users r
+WHERE r.rank >= (((SELECT rank FROM target_user) - 1) / $2) * $2 + 1
+ORDER BY r.rank ASC
+LIMIT $2 + 1;
+`
+const GetLeaderboardPage = `
+SELECT 
+    user_id,
+    player_id, 
+    highest_score,
+    ROW_NUMBER() OVER (ORDER BY highest_score DESC, created_at ASC)::INT as rank
+FROM users
+ORDER BY rank ASC
+LIMIT $1 OFFSET $2
+;
+`

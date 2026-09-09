@@ -1,3 +1,4 @@
+
 document.addEventListener('DOMContentLoaded', () => {
     const errorLabel = document.getElementById('error-label');
     const chatBox = document.getElementById('chat-box');
@@ -6,6 +7,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnJoin = document.getElementById('btn-join');
     const btnSendChat = document.getElementById('btn-send-chat');
 
+    // State Tracking
+    let profileLoaded = false;
+    let achievementsLoaded = false;
+    let leaderboardLoaded = false;
+    let currentLeaderboardPage = 1;
+
     // Display URL error params if present
     const urlParams = new URLSearchParams(window.location.search);
     const errorMsg = urlParams.get('error');
@@ -13,11 +20,11 @@ document.addEventListener('DOMContentLoaded', () => {
         errorLabel.textContent = errorMsg;
     }
 
-    // Tab Navigation
+    // ==========================================
+    // TAB NAVIGATION
+    // ==========================================
     const tabBtns = document.querySelectorAll('.tab-btn');
     const tabContents = document.querySelectorAll('.tab-content');
-    let profileLoaded = false;
-    let achievementsLoaded = false;
 
     tabBtns.forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -30,126 +37,184 @@ document.addEventListener('DOMContentLoaded', () => {
             const activeContent = document.getElementById(targetTab);
             if (activeContent) activeContent.classList.add('active');
 
+            // PROFILE TAB (Set flag before fetch to prevent race conditions)
             if (targetTab === 'tab-profile' && !profileLoaded) {
-                const tabProfileContainer = document.getElementById('tab-profile');
-
-                try {
-                    // 1. Fetch template partial
-                    const htmlRes = await fetch('/profile.html');
-                    if (!htmlRes.ok) throw new Error(`HTML template fetch failed: ${htmlRes.statusText}`);
-                    tabProfileContainer.innerHTML = await htmlRes.text();
-
-                    // 2. Read cached stats directly from localStorage
-                    let userData = null;
-                    const cached = localStorage.getItem('user_stats');
-
-                    if (cached) {
-                        try {
-                            userData = JSON.parse(cached);
-                        } catch (e) {
-                            localStorage.removeItem('user_stats');
-                        }
-                    }
-
-                    // 3. Fallback: Fetch fresh data if cache missing
-                    if (!userData) {
-                        const apiRes = await fetch('/api/users/me');
-
-                        if (!apiRes.ok) {
-                            if (apiRes.status === 401 || apiRes.status === 403) {
-                                localStorage.removeItem('user_stats');
-                                window.location.href = '/'; // Kick unauthenticated user to login
-                                return;
-                            }
-                            throw new Error(`API fetch failed: ${apiRes.status}`);
-                        }
-
-                        userData = await apiRes.json();
-                        localStorage.setItem('user_stats', JSON.stringify(userData));
-                    }
-
-                    // 4. Populate UI
-                    document.getElementById('stat-player-id').textContent = userData.player_id || '--';
-                    document.getElementById('stat-highest-level').textContent = userData.highest_player_level ?? 1;
-                    document.getElementById('stat-levels').textContent = userData.total_levels_completed ?? 0;
-                    document.getElementById('stat-enemies').textContent = userData.total_enemies_killed ?? 0;
-                    document.getElementById('stat-xp').textContent = userData.total_xp_gained ?? 0;
-                    document.getElementById('stat-damage-dealt').textContent = userData.total_damage_dealt ?? 0;
-                    document.getElementById('stat-damage-taken').textContent = userData.total_damage_taken ?? 0;
-                    document.getElementById('stat-deaths').textContent = userData.total_deaths ?? 0;
-                    document.getElementById('stat-game-time').textContent = formatGameTime(userData.total_game_time);
-
-                    profileLoaded = true;
-                } catch (err) {
-                    console.error("[Profile Load Error]:", err);
-                    tabProfileContainer.innerHTML = `<p class="profile-error">Unable to load profile stats.</p>`;
-                }
+                profileLoaded = true;
+                await loadProfileTab();
             }
 
+            // ACHIEVEMENTS TAB
             if (targetTab === 'tab-achievements' && !achievementsLoaded) {
-                const tabAchievementsContainer = document.getElementById('tab-achievements');
+                achievementsLoaded = true;
+                await loadAchievementsTab();
+            }
 
-                try {
-                    // 1. Fetch template partial (just like profile)
-                    const htmlRes = await fetch('/achievements.html');
-                    if (!htmlRes.ok) throw new Error(`HTML template fetch failed: ${htmlRes.statusText}`);
-                    tabAchievementsContainer.innerHTML = await htmlRes.text();
-
-                    // 2. Read cached achievements from localStorage
-                    let achievementsData = null;
-                    const cached = localStorage.getItem('user_achievements');
-
-                    if (cached) {
-                        try {
-                            achievementsData = JSON.parse(cached);
-                        } catch (e) {
-                            localStorage.removeItem('user_achievements');
-                        }
-                    }
-
-                    // 3. Fallback: Fetch fresh data if cache missing
-                    if (!achievementsData) {
-                        const response = await fetch('/api/users/me/achievements');
-                        
-                        if (!response.ok) {
-                            if (response.status === 401 || response.status === 403) {
-                                localStorage.removeItem('user_achievements');
-                                window.location.href = '/';
-                                return;
-                            }
-                            throw new Error(`API fetch failed: ${response.status}`);
-                        }
-
-                        achievementsData = await response.json();
-                        localStorage.setItem('user_achievements', JSON.stringify(achievementsData));
-                    }
-
-                    // 4. Populate UI elements
-                    renderAchievements(achievementsData);
-
-                    achievementsLoaded = true;
-                } catch (err) {
-                    console.error("[Achievements Load Error]:", err);
-                    tabAchievementsContainer.innerHTML = `<p class="profile-error">Failed to load achievements.</p>`;
-                }
+            // LEADERBOARD TAB
+            if (targetTab === 'tab-leaderboard' && !leaderboardLoaded) {
+                leaderboardLoaded = true;
+                await loadLeaderboardUser();
             }
         });
     });
 
-    // Start New Game
+    // ==========================================
+    // PROFILE TAB LOADER
+    // ==========================================
+    async function loadProfileTab() {
+        const tabProfileContainer = document.getElementById('tab-profile');
+        try {
+            const htmlRes = await fetch('/profile.html');
+            if (!htmlRes.ok) throw new Error(`HTML fetch failed: ${htmlRes.statusText}`);
+            tabProfileContainer.innerHTML = await htmlRes.text();
+
+            let userData = getCachedJSON('user_stats');
+
+            if (!userData) {
+                const apiRes = await fetch('/api/users/me');
+                if (!apiRes.ok) {
+                    if (apiRes.status === 401 || apiRes.status === 403) {
+                        localStorage.removeItem('user_stats');
+                        window.location.href = '/';
+                        return;
+                    }
+                    throw new Error(`API fetch failed: ${apiRes.status}`);
+                }
+                userData = await apiRes.json();
+                localStorage.setItem('user_stats', JSON.stringify(userData));
+            }
+
+            document.getElementById('stat-player-id').textContent = userData.player_id || '--';
+            document.getElementById('stat-highest-level').textContent = userData.highest_player_level ?? 1;
+            document.getElementById('stat-levels').textContent = userData.total_levels_completed ?? 0;
+            document.getElementById('stat-enemies').textContent = userData.total_enemies_killed ?? 0;
+            document.getElementById('stat-xp').textContent = userData.total_xp_gained ?? 0;
+            document.getElementById('stat-damage-dealt').textContent = userData.total_damage_dealt ?? 0;
+            document.getElementById('stat-damage-taken').textContent = userData.total_damage_taken ?? 0;
+            document.getElementById('stat-deaths').textContent = userData.total_deaths ?? 0;
+            document.getElementById('stat-game-time').textContent = formatGameTime(userData.total_game_time);
+
+        } catch (err) {
+            console.error("[Profile Load Error]:", err);
+            profileLoaded = false; // Reset on failure to allow retry
+            tabProfileContainer.innerHTML = `<p class="profile-error">Unable to load profile stats.</p>`;
+        }
+    }
+
+    // ==========================================
+    // ACHIEVEMENTS TAB LOADER
+    // ==========================================
+    async function loadAchievementsTab() {
+        const tabAchievementsContainer = document.getElementById('tab-achievements');
+        try {
+            const htmlRes = await fetch('/achievements.html');
+            if (!htmlRes.ok) throw new Error(`HTML fetch failed: ${htmlRes.statusText}`);
+            tabAchievementsContainer.innerHTML = await htmlRes.text();
+
+            let achievementsData = getCachedJSON('user_achievements');
+
+            if (!achievementsData) {
+                const response = await fetch('/api/users/me/achievements');
+                if (!response.ok) {
+                    if (response.status === 401 || response.status === 403) {
+                        localStorage.removeItem('user_achievements');
+                        window.location.href = '/';
+                        return;
+                    }
+                    throw new Error(`API fetch failed: ${response.status}`);
+                }
+                achievementsData = await response.json();
+                localStorage.setItem('user_achievements', JSON.stringify(achievementsData));
+            }
+
+            renderAchievements(achievementsData);
+        } catch (err) {
+            console.error("[Achievements Load Error]:", err);
+            achievementsLoaded = false;
+            tabAchievementsContainer.innerHTML = `<p class="profile-error">Failed to load achievements.</p>`;
+        }
+    }
+
+    // ==========================================
+    // LEADERBOARD FETCH & PAGINATION
+    // ==========================================
+    async function loadLeaderboardUser() {
+        try {
+            const response = await fetch(`/api/users/me/leaderboard`);
+            if (!response.ok) {
+                if (response.status === 401 || response.status === 403) {
+                    window.location.href = '/';
+                    return;
+                }
+                throw new Error(`API fetch failed: ${response.status}`);
+            }
+
+            const data = await response.json();
+            renderLeaderboardPayload(data);
+        } catch (err) {
+            console.error("[Leaderboard Load Error]:", err);
+            const tbody = document.getElementById('leaderboard-tbody');
+            if (tbody) tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;">Error loading leaderboard.</td></tr>`;
+        }
+    }
+
+    async function loadLeaderboardPage(page) {
+        try {
+            const response = await fetch(`/api/leaderboard?page=${page}`);
+            if (!response.ok) {
+                if (response.status === 401 || response.status === 403) {
+                    window.location.href = '/';
+                    return;
+                }
+                throw new Error(`API fetch failed: ${response.status}`);
+            }
+
+            const data = await response.json();
+            renderLeaderboardPayload(data);
+            currentLeaderboardPage = data.CurrentPage;
+        } catch (err) {
+            console.error("[Leaderboard Load Error]:", err);
+            const tbody = document.getElementById('leaderboard-tbody');
+            if (tbody) tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;">Error loading leaderboard.</td></tr>`;
+        }
+    }
+
+    const btnPrev = document.getElementById('btn-leaderboard-prev');
+    const btnNext = document.getElementById('btn-leaderboard-next');
+    const myTbody = document.getElementById('leaderboard-my-tbody');
+
+    if (btnPrev) {
+        btnPrev.addEventListener('click', async () => {
+            if (currentLeaderboardPage > 1) {
+                await loadLeaderboardPage(currentLeaderboardPage - 1);
+            }
+        });
+    }
+
+    if (btnNext) {
+        btnNext.addEventListener('click', async () => {
+            await loadLeaderboardPage(currentLeaderboardPage + 1);
+        });
+    }
+
+    if (myTbody) {
+        myTbody.addEventListener('click', async () => {
+            await loadLeaderboardUser();
+        });
+    }
+
+    // ==========================================
+    // GAME CREATION & JOIN
+    // ==========================================
     if (btnStart) {
         btnStart.addEventListener('click', async () => {
             if (errorLabel) errorLabel.textContent = "";
-
             try {
                 const res = await fetch('/api/games', { method: 'POST' });
-                
                 if (!res.ok) {
                     const errorMessage = await res.text();
                     if (errorLabel) errorLabel.textContent = errorMessage.trim() || "Failed to start game.";
                     return;
                 }
-
                 const data = await res.json();
                 window.location.href = `/game.html?gameId=${encodeURIComponent(data.game_id)}`;
             } catch (err) {
@@ -158,30 +223,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Join Existing Game
     if (btnJoin) {
         btnJoin.addEventListener('click', async () => {
             if (errorLabel) errorLabel.textContent = "";
-            
             const gameIdInput = document.getElementById('game-id-input');
             const gameId = gameIdInput ? gameIdInput.value.trim() : "";
-            
+
             if (!gameId) {
                 if (errorLabel) errorLabel.textContent = "Please paste a Game ID.";
                 return;
             }
 
             try {
-                const response = await fetch(`/api/games/${encodeURIComponent(gameId)}/join`, {
-                    method: 'POST'
-                });
-
+                const response = await fetch(`/api/games/${encodeURIComponent(gameId)}/join`, { method: 'POST' });
                 if (!response.ok) {
                     const errorMessage = await response.text();
                     if (errorLabel) errorLabel.textContent = errorMessage.trim() || "Failed to join game.";
                     return;
                 }
-                
                 const data = await response.json();
                 window.location.href = `/game.html?gameId=${encodeURIComponent(data.game_id)}`;
             } catch (err) {
@@ -190,13 +249,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Connect Global Chat WebSocket
+    // ==========================================
+    // GLOBAL CHAT WEBSOCKET
+    // ==========================================
     if (chatBox && chatInput) {
         const protocol = location.protocol === "https:" ? "wss:" : "ws:";
         const chatSocket = new WebSocket(`${protocol}//${window.location.host}/ws/global-chat`);
 
         chatSocket.onmessage = (event) => {
             const msgDiv = document.createElement('div');
+            msgDiv.className = 'chat-message';
             msgDiv.textContent = event.data;
             chatBox.appendChild(msgDiv);
             chatBox.scrollTop = chatBox.scrollHeight;
@@ -210,68 +272,143 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        if (btnSendChat) {
-            btnSendChat.addEventListener('click', sendChatMessage);
-        }
+        if (btnSendChat) btnSendChat.addEventListener('click', sendChatMessage);
         chatInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') sendChatMessage();
         });
     }
 });
 
+// ==========================================
+// HELPER FUNCTIONS & RENDERERS
+// ==========================================
+let cachedCurrentUser = null;
+
+function renderLeaderboardPayload(data) {
+    const myTbody = document.getElementById('leaderboard-my-tbody');
+    const tbody = document.getElementById('leaderboard-tbody');
+    const indicator = document.getElementById('leaderboard-page-indicator');
+    const btnPrev = document.getElementById('btn-leaderboard-prev');
+    const btnNext = document.getElementById('btn-leaderboard-next');
+
+    const currentPage = data.CurrentPage || 1;
+    currentLeaderboardPage = currentPage;
+
+    if (indicator) indicator.textContent = `PAGE ${currentPage}`;
+    if (btnPrev) btnPrev.disabled = !data.PreviousPageAvailable;
+    if (btnNext) btnNext.disabled = !data.NextPageAvailable;
+
+    if (data.CurrentUser) {
+        cachedCurrentUser = data.CurrentUser;
+        updateUserStatsCache(data.CurrentUser);
+    }
+
+    if (myTbody && cachedCurrentUser) {
+        myTbody.innerHTML = `
+            <tr style="cursor: pointer;" title="Click to jump to your page">
+                <td>#${cachedCurrentUser.Rank}</td>
+                <td>${escapeHtml(cachedCurrentUser.PlayerID || '--')}</td>
+                <td>${cachedCurrentUser.HighestScore ?? 0}</td>
+            </tr>
+        `;
+    }
+
+    if (tbody) {
+        tbody.innerHTML = '';
+        const users = data.UsersOnPage || [];
+
+        if (users.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="3" style="text-align: center;">No rankings found.</td></tr>`;
+            return;
+        }
+
+        const currentUserId = cachedCurrentUser?.UserID;
+        const fragment = document.createDocumentFragment();
+
+        users.forEach(user => {
+            const tr = document.createElement('tr');
+            if (currentUserId && user.UserID === currentUserId) {
+                tr.style.background = "rgba(59, 130, 246, 0.12)";
+            }
+            tr.innerHTML = `    
+                <td>#${user.Rank}</td>
+                <td>${escapeHtml(user.PlayerID || '--')}</td>
+                <td>${user.HighestScore ?? 0}</td>
+            `;
+            fragment.appendChild(tr);
+        });
+
+        tbody.appendChild(fragment);
+    }
+}
+
+function updateUserStatsCache(currentUserData) {
+    const cached = localStorage.getItem('user_stats');
+    let stats = {};
+    if (cached) {
+        try { stats = JSON.parse(cached); } catch (e) {}
+    }
+    stats.rank = currentUserData.Rank;
+    stats.highest_score = currentUserData.HighestScore;
+    stats.player_id = currentUserData.PlayerID;
+    localStorage.setItem('user_stats', JSON.stringify(stats));
+}
+
 function renderAchievements(achievements) {
     achievements.forEach(ach => {
-        // Map using the code field since achievement_id is a UUID
         const achievementId = ach.code || ach.achievement_id || ach.id || ach.title.toLowerCase().replace(/\s+/g, '_');
         const card = document.querySelector(`[data-achievement-id="${achievementId}"]`);
         if (!card) return;
 
-        // Toggle unlocked state
-        if (ach.is_unlocked) {
-            card.classList.add("unlocked");
-        } else {
-            card.classList.remove("unlocked");
-        }
+        card.classList.toggle("unlocked", Boolean(ach.is_unlocked));
 
-        // Update icon
         const icon = card.querySelector(".achievement-icon-placeholder");
         if (icon) {
             icon.textContent = ach.is_unlocked ? "✓" : "🔒";
         }
 
-      const progressContainer = card.querySelector(".achievement-progress-container");
-    if (progressContainer) {
-        if (ach.is_unlocked) {
-            progressContainer.style.display = "none";
-        } else {
-        progressContainer.style.display = "block";
+        const progressContainer = card.querySelector(".achievement-progress-container");
+        if (progressContainer) {
+            if (ach.is_unlocked) {
+                progressContainer.style.display = "none";
+            } else {
+                progressContainer.style.display = "block";
+                const progressRows = card.querySelectorAll("[data-progress-key]");
+                progressRows.forEach(progressItem => {
+                    const key = progressItem.getAttribute("data-progress-key");
+                    const currentVal = ach.progress && ach.progress[key] !== undefined ? ach.progress[key] : 0;
+                    const defaultMax = parseInt(progressItem.getAttribute("data-default-max"), 10);
+                    const maxVal = ach.max_progress && ach.max_progress[key] !== undefined ? ach.max_progress[key] : defaultMax;
+                    const percentage = maxVal > 0 ? Math.min(100, Math.floor((currentVal / maxVal) * 100)) : 0;
 
-        // Loop directly through the hardcoded DOM elements inside the card
-        const progressRows = card.querySelectorAll("[data-progress-key]");
-        progressRows.forEach(progressItem => {
-            const key = progressItem.getAttribute("data-progress-key"); // e.g., "1:0"
-            
-            const currentVal = ach.progress && ach.progress[key] !== undefined ? ach.progress[key] : 0;
-            // If max_progress isn't populated from the backend yet,
-            const defaultMax = parseInt(progressItem.getAttribute("data-default-max"), 10);
-            const maxVal = ach.max_progress && ach.max_progress[key] !== undefined ? ach.max_progress[key] : defaultMax;
-            
-            const percentage = maxVal > 0 ? Math.min(100, Math.floor((currentVal / maxVal) * 100)) : 0;
+                    const fillBar = progressItem.querySelector(".achievement-progress-bar-fill");
+                    const textVal = progressItem.querySelector(".achievement-progress-text");
 
-            const fillBar = progressItem.querySelector(".achievement-progress-bar-fill");
-            const textVal = progressItem.querySelector(".achievement-progress-text");
+                    if (fillBar) fillBar.style.width = `${percentage}%`;
+                    if (textVal) textVal.textContent = `${currentVal} / ${maxVal}`;
+                });
+            }
+        }
+    });
+}
 
-            if (fillBar) fillBar.style.width = `${percentage}%`;
-            if (textVal) textVal.textContent = `${currentVal} / ${maxVal}`;
-        });
+function getCachedJSON(key) {
+    const cached = localStorage.getItem(key);
+    if (!cached) return null;
+    try {
+        return JSON.parse(cached);
+    } catch (e) {
+        localStorage.removeItem(key);
+        return null;
     }
 }
-    });
+
+function escapeHtml(str) {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function formatGameTime(totalSeconds) {
     if (!totalSeconds || totalSeconds <= 0) return '0s';
-
     const days = Math.floor(totalSeconds / 86400);
     const hours = Math.floor((totalSeconds % 86400) / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);

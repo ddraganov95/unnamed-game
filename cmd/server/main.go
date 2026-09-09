@@ -30,9 +30,11 @@ func main() {
 	srv.Mux.HandleFunc("POST /api/users", srv.HandleCreateUser)
 	srv.Mux.HandleFunc("GET /api/users/me", srv.HandleGetSelf)
 	srv.Mux.HandleFunc("GET /api/users/me/achievements", srv.HandleGetSelfAchievements)
+	srv.Mux.HandleFunc("GET /api/users/me/leaderboard", srv.HandleGetSelfLeaderboard)
 	srv.Mux.HandleFunc("GET /api/users/{id}", srv.HandleGetUser)
 	srv.Mux.HandleFunc("POST /api/games", srv.HandleCreateGame)
 	srv.Mux.HandleFunc("POST /api/games/{id}/join", srv.HandleJoinGame)
+	srv.Mux.HandleFunc("GET /api/leaderboard", srv.HandleLeaderboard)
 	srv.Mux.HandleFunc("/ws", srv.HandleWebSocket)
 	srv.Mux.HandleFunc("/ws/global-chat", srv.HandleLobbyChatWS)
 

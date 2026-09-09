@@ -32,6 +32,8 @@ type User struct {
 	HighestPlayerLevel     int       `db:"highest_player_level" json:"highest_player_level"`
 	TotalEnemiesKilled     int       `db:"total_enemies_killed" json:"total_enemies_killed"`
 	TotalAchievementPoints int       `db:"total_achievement_points" json:"total_achievement_points"`
+	HighestScore           int       `db:"highest_score" json:"highest_score"`
+	Rank                   int       `db:"rank" json:"rank"`
 }
 
 func (db *Database) UpsertUser(ctx context.Context, playerID string) (*UserRef, error) {
@@ -72,6 +74,7 @@ func (db *Database) UpdatePlayerAfterDisconnect(
 		gameTimeSeconds,
 		summary.Deaths,
 		summary.PlayerLevel,
+		summary.Score,
 		achJSON,
 	)
 	if err != nil {

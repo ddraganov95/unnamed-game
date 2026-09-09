@@ -10,8 +10,7 @@ import (
 )
 
 type Game struct {
-	Level Level
-
+	Level             Level
 	Events            []Event
 	Frame             [][]rune
 	GlobalChat        chan string
@@ -303,8 +302,8 @@ func (game *Game) DrawPlayerHUD(player *Player) {
 		return
 	}
 	// Draw personal player stats at the top of the middle section
-	hudText := fmt.Sprintf(" %c%d | %c%v | %c%d/%d | %c%d",
-		SymbolHitPoints, player.CurrentHealth, SymbolCurrentAttack, player.GetEquippedAttack().String(), SymbolCurrentExperience, player.ExperienceVal, GetXpRequiredForNextLevel(player.Level), SymbolCurrentLevel, player.Level)
+	hudText := fmt.Sprintf(" %c%d | %c%v | %c%d/%d | %c%d | %c%d |%c%d",
+		SymbolHitPoints, player.CurrentHealth, SymbolCurrentAttack, player.GetEquippedAttack().String(), SymbolCurrentExperience, player.ExperienceVal, GetXpRequiredForNextLevel(player.Level), SymbolCurrentLevel, player.Level, SymbolCurrentGameLevel, game.LevelNumber, SymbolScore, player.Score)
 	gameStartCol := MaxMessageLength + 3
 	for col, ch := range hudText {
 		targetCol := gameStartCol + col

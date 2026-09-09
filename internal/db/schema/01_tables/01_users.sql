@@ -11,5 +11,7 @@ total_game_time bigint DEFAULT 0,
 total_deaths int DEFAULT 0,
 highest_player_level int DEFAULT 1,
 total_enemies_killed int DEFAULT 0,
-total_achievement_points int DEFAULT 0
+total_achievement_points int DEFAULT 0,
+highest_score int DEFAULT 0
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS highest_score INT DEFAULT 0;

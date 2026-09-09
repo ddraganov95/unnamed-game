@@ -32,6 +32,7 @@ type PlayerSessionSummary struct {
 	DamageTaken     int           `json:"damage_taken"`
 	PlayerLevel     int           `json:"player_level"`
 	Deaths          int           `json:"player_deaths"`
+	Score           int           `json:"score"`
 }
 
 func (h *Health) TakeDamage(amount int) {
@@ -51,8 +52,10 @@ func CreateHealth(maxHealth int) Health {
 }
 func (player *Player) GenerateSummary() PlayerSessionSummary {
 	deaths := 0
+	score := player.Score
 	if !player.IsAlive() {
 		deaths = 1
+		score = 0
 	}
 	return PlayerSessionSummary{
 		GameID:          player.GameID,
@@ -66,6 +69,7 @@ func (player *Player) GenerateSummary() PlayerSessionSummary {
 		DamageTaken:     player.DamageTaken,
 		PlayerLevel:     player.Level,
 		Deaths:          deaths,
+		Score:           score,
 	}
 }
 func GetSummaryLines(summary PlayerSessionSummary) []string {
@@ -84,6 +88,7 @@ func GetSummaryLines(summary PlayerSessionSummary) []string {
 		"+--------------------------------------------------------+",
 		fmt.Sprintf("| Damage Dealt:   %-38d |", summary.DamageDealt),
 		fmt.Sprintf("| Damage Taken:   %-38d |", summary.DamageTaken),
+		fmt.Sprintf("| Score:          %-38d |", summary.Score),
 		"+--------------------------------------------------------+",
 		"|               Press [SPACE] to continue                |",
 		"|                Press [Q] to quit game                  |",
@@ -106,6 +111,7 @@ func GetGameOverSummaryLines(summary PlayerSessionSummary) []string {
 		"+--------------------------------------------------+",
 		fmt.Sprintf("| Damage Dealt:   %-32d |", summary.DamageDealt),
 		fmt.Sprintf("| Damage Taken:   %-32d |", summary.DamageTaken),
+		fmt.Sprintf("| Score:          %-32d |", summary.Score),
 		"+--------------------------------------------------+",
 		"|             Press [Q] to exit game...            |",
 		"+--------------------------------------------------+",
