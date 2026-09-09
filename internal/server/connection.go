@@ -186,6 +186,7 @@ func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string)
 		log.Printf("[ERROR] Failed to save stats for %s on disconnect: %v\n", playerID, err)
 	} else {
 		log.Printf("[DB] Successfully saved session summary for %s\n", playerID)
+		log.Printf("[DB] Rank for player %s: %d\n", playerID, user.Rank)
 		if exists {
 			conn.WriteJSON(map[string]any{
 				"type":         "session_summary",

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"unnamed-game/internal/db"
 	"unnamed-game/internal/game"
 	"uuid"
 
@@ -124,7 +126,9 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+	server.lobbyMu.Lock()
 	server.playerUsers[playerID], err = uuid.Parse(userID)
+	server.lobbyMu.Unlock()
 	if err != nil {
 		http.Error(w, "Invalid user ID format in session", http.StatusUnauthorized)
 		return
@@ -219,7 +223,9 @@ func (server *Server) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cookieValue := fmt.Sprintf("%s:%s", user.UserID, user.PlayerID)
+	server.mu.Lock()
 	server.playerUsers[req.PlayerID] = user.UserID
+	server.mu.Unlock()
 	log.Printf("[DB] Successfully saved %s player with UUID %s", req.PlayerID, user.UserID)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "player_session",
@@ -279,9 +285,12 @@ func (server *Server) HandleGetSelf(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to encode user data", http.StatusInternalServerError)
 		return
 	}
+	server.mu.Lock()
 	server.playerUsers[playerID] = user.UserID
+	server.mu.Unlock()
 	log.Printf("[DB] Successfully saved %s player with UUID %s", playerID, user.UserID)
 }
+
 func (server *Server) HandleGetSelfAchievements(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -308,8 +317,147 @@ func (server *Server) HandleGetSelfAchievements(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	server.mu.Lock()
 	server.playerUsers[playerID] = userID
+	server.mu.Unlock()
 	log.Printf("[DB] Successfully fetched achievements for player with UUID %s", userID.String())
+}
+
+const LeaderBoardPageSize = 10 //NUMBER OF ROWS SHOWN ON THE LEADERBOARD
+type SelfLeaderboardReponse struct {
+	CurrentUser           db.UserLeaderboardView   `json:"CurrentUser"`
+	UsersOnPage           []db.UserLeaderboardView `json:"UsersOnPage"`
+	CurrentPage           int                      `json:"CurrentPage"`
+	NextPageAvailable     bool                     `json:"NextPageAvailable"`
+	PreviousPageAvailable bool                     `json:"PreviousPageAvailable"`
+}
+
+func (server *Server) HandleGetSelfLeaderboard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	userIDStr, playerID, err := ExtractSessionIDs(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch 10 + 1 rows aligned to user's page
+	usersOnLeaderboard, err := server.db.FetchUserLeaderboard(r.Context(), userID, LeaderBoardPageSize)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	currentuser, err := getCurrentUserFromPage(userID, usersOnLeaderboard)
+	if err != nil {
+		log.Printf("[DB] %s,%s", userID.String(), err)
+	}
+
+	// Correct page calculation math
+	currentPage := 1
+	if currentuser.Rank > 0 {
+		currentPage = ((currentuser.Rank - 1) / LeaderBoardPageSize) + 1
+	}
+
+	// Check N+1 for pagination
+	hasNext := len(usersOnLeaderboard) > LeaderBoardPageSize
+	hasPrev := currentPage > 1
+
+	if hasNext {
+		usersOnLeaderboard = usersOnLeaderboard[:LeaderBoardPageSize]
+	}
+
+	response := SelfLeaderboardReponse{
+		CurrentUser:           currentuser,
+		CurrentPage:           currentPage,
+		UsersOnPage:           usersOnLeaderboard,
+		NextPageAvailable:     hasNext,
+		PreviousPageAvailable: hasPrev,
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode leaderboard data", http.StatusInternalServerError)
+		return
+	}
+
+	server.mu.Lock()
+	server.playerUsers[playerID] = userID
+	server.mu.Unlock()
+	log.Printf("[DB] Successfully fetched leaderboard for player with UUID %s", userID.String())
+}
+func getCurrentUserFromPage(userID uuid.UUID, usersOnLeaderboard []db.UserLeaderboardView) (db.UserLeaderboardView, error) {
+	for i := range usersOnLeaderboard {
+		if usersOnLeaderboard[i].UserID == userID {
+			return usersOnLeaderboard[i], nil
+		}
+	}
+	return db.UserLeaderboardView{}, errors.New("Couldn't find user on his leaderboard page")
+}
+
+type LeaderboardReponse struct {
+	UsersOnPage           []db.UserLeaderboardView `json:"UsersOnPage"`
+	CurrentPage           int                      `json:"CurrentPage"`
+	NextPageAvailable     bool                     `json:"NextPageAvailable"`
+	PreviousPageAvailable bool                     `json:"PreviousPageAvailable"`
+}
+
+func (server *Server) HandleLeaderboard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	//?page=1 or path value /1)
+	pageStr := r.URL.Query().Get("page")
+	if pageStr == "" {
+		pageStr = r.PathValue("page")
+	}
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+	usersOnLeaderboard, err := server.db.FetchLeaderboardPage(r.Context(), page, LeaderBoardPageSize+1)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	hasNext, hasPrev := getPrevNext(usersOnLeaderboard, page, LeaderBoardPageSize)
+	if hasNext {
+		usersOnLeaderboard = usersOnLeaderboard[:LeaderBoardPageSize]
+	}
+	response := LeaderboardReponse{
+		UsersOnPage:           usersOnLeaderboard,
+		CurrentPage:           page,
+		NextPageAvailable:     hasNext,
+		PreviousPageAvailable: hasPrev,
+	}
+
+	//Send JSON
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode leaderboard data", http.StatusInternalServerError)
+		return
+	}
+}
+func getPrevNext[T any](paginatedList []T, page int, maxSize int) (bool, bool) {
+	//This method assumes that the list will be generated with page size + 1
+	hasNext := false
+	if len(paginatedList) > maxSize {
+		hasNext = true
+	}
+
+	hasPrev := false
+	if page > 1 {
+		hasPrev = true
+	}
+	return hasNext, hasPrev
 }
 func ExtractSessionIDs(r *http.Request) (userID, playerID string, err error) {
 	cookie, err := r.Cookie("player_session")

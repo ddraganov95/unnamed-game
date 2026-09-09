@@ -110,6 +110,15 @@ func (archer *Archer) GetType() string {
 func (enemy *Enemy) GetType() string {
 	return "enemy"
 }
+func (enemy *Enemy) GetScore() int {
+	switch enemy.EnemyType {
+	case EnemyGoblin:
+		return 5
+	case EnemyArcher:
+		return 7
+	}
+	return 1
+}
 func CreateArcher(countArcher int, pos Position) GameObject {
 	id := fmt.Sprintf("Archer %d", countArcher)
 	archer := &Archer{
@@ -412,6 +421,7 @@ func (enemy *Enemy) CheckDeath(game *Game) {
 		killer := enemy.GetLastDamageTakenFrom()
 		if player, ok := game.GetPlayerByID(killer); ok {
 			player.EnemiesKilled++
+			player.AddScore(enemy.GetScore())
 		}
 		game.AchievementEngine.PublishEvent(AchievementEvent{
 			PlayerIDs: game.GetActiveAndAlivePlayerID(),
@@ -420,6 +430,7 @@ func (enemy *Enemy) CheckDeath(game *Game) {
 		})
 		game.CreateLog("%s %s killed %s", LogSuccess, killer, enemy.GetID())
 		enemy.DistributeXp(game)
+
 		game.Level.RemoveEntity(enemy)
 	}
 }

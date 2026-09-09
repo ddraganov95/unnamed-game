@@ -250,3 +250,7 @@ func GetXpRequiredForNextLevel(currentLevel int) int {
 func (player *Player) GetLastDamageTakenFrom() string {
 	return player.LastDamageRecieved.EntityID
 }
+func (player *Player) AddScore(score int) {
+	scoreToAdd := int(float64(score) * (1.0 + float64(player.LevelsCompleted)*0.1))
+	player.Score += scoreToAdd
+}

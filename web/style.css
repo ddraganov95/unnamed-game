@@ -416,3 +416,134 @@ button:hover {
     grid-template-columns: repeat(2, 1fr); /* Creates a strict 2-column grid */
     gap: 16px;
 }
+/* Leaderboard Component Styling */
+.leaderboard-container {
+    min-height: 374px;
+    background-color: #05070a;
+    border: 1px solid #1a2634;
+    border-radius: 4px;
+    padding: 20px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    max-height: 450px;
+}
+
+.leaderboard-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: monospace;
+    font-size: 13px;
+    text-align: left;
+}
+
+.leaderboard-table th {
+    color: #9ca3af;
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 10px 12px;
+    border-bottom: 1px solid #1f2937;
+}
+
+.leaderboard-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #1f2937;
+    color: #f3f4f6;
+}
+
+.leaderboard-table tr:hover td {
+    background: rgba(55, 65, 81, 0.2);
+}
+
+.leaderboard-table td:first-child,
+.leaderboard-table th:first-child {
+    width: 80px;
+    color: #60a5fa;
+    font-weight: bold;
+}
+
+.leaderboard-table td:last-child,
+.leaderboard-table th:last-child {
+    text-align: right;
+    color: #34d399;
+    font-weight: bold;
+}
+
+/* Leaderboard Scrollbar consistency */
+.leaderboard-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.leaderboard-container::-webkit-scrollbar-track {
+    background: #05070a;
+}
+
+.leaderboard-container::-webkit-scrollbar-thumb {
+    background: #1a2634;
+    border-radius: 3px;
+}
+
+.leaderboard-container::-webkit-scrollbar-thumb:hover {
+    background: #374151;
+}
+/* Leaderboard Pagination Controls */
+.leaderboard-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 12px;
+    padding: 0 4px;
+}
+
+.leaderboard-pagination .page-btn {
+    width: 100px;
+    height: 36px;
+    font-size: 11px;
+}
+
+#leaderboard-page-indicator {
+    font-size: 12px;
+    color: #9ca3af;
+    letter-spacing: 1px;
+    font-family: monospace;
+}
+/* Pinned Current User Container */
+.leaderboard-my-row {
+    margin-bottom: 12px;
+    background-color: rgba(59, 130, 246, 0.05);
+    border: 1px solid #3b82f6;
+    border-radius: 4px;
+    padding: 6px;
+}
+
+/* Ensure column widths match between pinned table and main table */
+.leaderboard-my-row .leaderboard-table th,
+.leaderboard-my-row .leaderboard-table td,
+.leaderboard-container .leaderboard-table th,
+.leaderboard-container .leaderboard-table td {
+    text-align: left;
+}
+
+.leaderboard-my-row .leaderboard-table th:last-child,
+.leaderboard-my-row .leaderboard-table td:last-child,
+.leaderboard-container .leaderboard-table th:last-child,
+.leaderboard-container .leaderboard-table td:last-child {
+    text-align: right;
+}
+
+/* Highlight user rank text */
+.leaderboard-my-row #leaderboard-my-tbody td {
+    color: #60a5fa;
+    font-weight: bold;
+}
+
+/* Utility class for hiding pinned container when data isn't loaded */
+.hidden {
+    display: none !important;
+}
+#leaderboard-my-tbody tr#pinned-user-row:hover {
+    background-color: rgba(59, 130, 246, 0.2);
+    transition: background-color 0.15s ease-in-out;
+}

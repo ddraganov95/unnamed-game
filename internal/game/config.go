@@ -51,6 +51,8 @@ const (
 	SymbolCurrentAttack     = '⚔'
 	SymbolCurrentExperience = '✦'
 	SymbolCurrentLevel      = 'ᛟ'
+	SymbolScore             = '★'
+	SymbolCurrentGameLevel  = '⚑'
 )
 
 // Combat Constants

@@ -36,6 +36,7 @@
             <button type="button" class="tab-btn active" data-tab="tab-chat">CHAT</button>
             <button type="button" class="tab-btn" data-tab="tab-profile">PROFILE</button>
             <button type="button" class="tab-btn" data-tab="tab-achievements">ACHIEVEMENTS</button>
+            <button type="button" class="tab-btn" data-tab="tab-leaderboard">LEADERBOARD</button>
         </div>
 
         <!-- Tab Content Wrapper -->
@@ -57,6 +58,48 @@
             <div id="tab-achievements" class="tab-content">
                 <div id="achievements-grid" class="achievements-grid">
                     <!-- Dynamically populated or template cards -->
+                </div>
+            </div>
+
+           <!-- LEADERBOARD TAB -->
+            <div id="tab-leaderboard" class="tab-content">
+                <!-- Pinned Current User Standing -->
+                <div id="leaderboard-my-row-container" class="leaderboard-my-row">
+                    <table class="leaderboard-table">
+                        <thead>
+                            <tr>
+                                <th>YOUR RANK</th>
+                                <th>PLAYER ID</th>
+                                <th>HIGHEST SCORE</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaderboard-my-tbody">
+                            <!-- Populated dynamically via JS -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Main Leaderboard List -->
+                <div class="leaderboard-container">
+                    <table class="leaderboard-table">
+                        <thead>
+                            <tr>
+                                <th>RANK</th>
+                                <th>PLAYER ID</th>
+                                <th>HIGHEST SCORE</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaderboard-tbody">
+                            <!-- Dynamically populated via JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination Controls -->
+                <div class="leaderboard-pagination">
+                    <button id="btn-leaderboard-prev" type="button" class="page-btn">PREV</button>
+                    <span id="leaderboard-page-indicator">PAGE 1</span>
+                    <button id="btn-leaderboard-next" type="button" class="page-btn">NEXT</button>
                 </div>
             </div>
         </div>
