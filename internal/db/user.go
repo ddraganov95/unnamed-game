@@ -14,8 +14,8 @@ import (
 )
 
 type UserRef struct {
-	UserID   uuid.UUID
-	PlayerID string
+	UserID   uuid.UUID `db:"user_id" json:"user_id"`
+	PlayerID string    `db:"player_id" json:"player_id"`
 }
 
 type User struct {
@@ -83,8 +83,8 @@ func (db *Database) UpdatePlayerAfterDisconnect(
 
 	return &user, nil
 }
-func (db *Database) FetchUserSummary(ctx context.Context, playerID string) (*User, error) {
-	rows, err := db.Pool.Query(ctx, GetUserSummary, playerID)
+func (db *Database) FetchUserSummary(ctx context.Context, userID string) (*User, error) {
+	rows, err := db.Pool.Query(ctx, GetUserSummary, userID)
 	if err != nil {
 		log.Printf("[DB ERROR]:GET User Summary query fail %v", err) // Print full error description
 		return nil, fmt.Errorf("failed to scan updated user: %w", err)

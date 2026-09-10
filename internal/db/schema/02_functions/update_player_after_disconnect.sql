@@ -1,7 +1,3 @@
-DROP FUNCTION IF EXISTS update_player_after_disconnect(UUID, BIGINT, BIGINT, BIGINT, BIGINT, INT, BIGINT, INT, INT, INT, JSONB);
-DROP FUNCTION IF EXISTS update_player_after_disconnect(UUID, BIGINT, BIGINT, BIGINT, BIGINT, INT, BIGINT, INT, INT, JSONB);
-DROP FUNCTION IF EXISTS update_player_after_disconnect(UUID, BIGINT, BIGINT, BIGINT, BIGINT, BIGINT, BIGINT, BIGINT, INT, JSONB);
-
 CREATE OR REPLACE FUNCTION update_player_after_disconnect(
     p_user_id UUID,
     p_xp_gained BIGINT,

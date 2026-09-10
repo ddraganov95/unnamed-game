@@ -1,0 +1,73 @@
+<div class="config-container">
+    <div class="config-subtabs">
+        <button type="button" class="config-subtab-btn active" data-subtab="config-keybinds">Controls</button>
+        <button type="button" class="config-subtab-btn" data-subtab="config-audio">Audio</button>
+    </div>
+
+    <!-- CONTROLS SUB-TAB -->
+    <div id="config-keybinds" class="config-subcontent active">
+        <table class="config-table">
+            <thead>
+                <tr>
+                    <th>Action</th>
+                    <th>Assigned Key</th>
+                </tr>
+            </thead>
+            <tbody id="keybinds-table-body">
+                <!-- Rebindable keys rendered here dynamically -->
+                <tr>
+                    <td>Move Up</td>
+                    <td><button type="button" class="key-badge" data-action="move_up">W</button></td>
+                </tr>
+                <tr>
+                    <td>Move Down</td>
+                    <td><button type="button" class="key-badge" data-action="move_down">S</button></td>
+                </tr>
+                <tr>
+                    <td>Move Left</td>
+                    <td><button type="button" class="key-badge" data-action="move_left">A</button></td>
+                </tr>
+                <tr>
+                    <td>Move Right</td>
+                    <td><button type="button" class="key-badge" data-action="move_right">D</button></td>
+                </tr>
+                 <tr>
+                    <td>Attack Enemy</td>
+                    <td><button type="button" class="key-badge" data-action="attack_enemy">F</button></td>
+                </tr>
+                    <tr>
+                    <td>Swap Attack</td>
+                    <td><button type="button" class="key-badge" data-action="swap_attack">E</button></td>
+                </tr>
+                    <tr>
+                    <td>Quit Game</td>
+                    <td><button type="button" class="key-badge" data-action="quit_game">Q</button></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- AUDIO SUB-TAB -->
+    <div id="config-audio" class="config-subcontent">
+        <div class="config-section-title">Sound Settings</div>
+
+        <div class="setting-row">
+            <label for="master-volume">MASTER VOLUME</label>
+            <input type="range" id="master-volume" min="0" max="100" value="80">
+            <span id="master-volume-val">80%</span>
+        </div>
+
+        <div class="setting-row">
+            <label for="sfx-volume">SFX VOLUME</label>
+            <input type="range" id="sfx-volume" min="0" max="100" value="100">
+            <span id="sfx-volume-val">100%</span>
+        </div>
+    </div>
+
+    <!-- FOOTER BUTTONS -->
+    <div class="config-footer">
+        <button type="button" id="btn-config-reset">Reset Defaults</button>
+        <button type="button" id="btn-config-save">Save Changes</button>
+        <span id="config-status-msg"></span>
+    </div>
+</div>

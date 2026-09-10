@@ -34,7 +34,9 @@ const (
 )
 const (
 	GetUserSummary = `
-	Select player_id,
+	Select 
+	user_id,
+	player_id,
 	total_enemies_killed,
 	total_xp_gained,
 	total_damage_dealt,
@@ -42,9 +44,11 @@ const (
 	total_levels_completed,
 	total_game_time,
 	total_deaths,
-	highest_player_level
+	highest_player_level,
+	total_achievement_points
+	highest_score
 	FROM users
-	WHERE player_id = $1;
+	WHERE user_id = $1;
 	`
 )
 const GetPlayerFullAchievementState = `
@@ -95,4 +99,15 @@ FROM users
 ORDER BY rank ASC
 LIMIT $1 OFFSET $2
 ;
+`
+const GetUserConfiguration = `
+SELECT config
+FROM user_configuration
+WHERE user_id = $1
+`
+const UpsertUserConfig = `
+INSERT INTO user_configuration (user_id, config)
+VALUES ($1, $2)
+ON CONFLICT (user_id) DO UPDATE
+SET config = EXCLUDED.config;
 `

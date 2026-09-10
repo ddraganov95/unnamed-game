@@ -1,3 +1,31 @@
+window.addEventListener("DOMContentLoaded", async () => {
+    await verifySessionAndRoute();
+});
+
+// Ensures session is re-checked when navigating back/forward from browser cache
+window.addEventListener("pageshow", async (event) => {
+    if (event.persisted) { 
+        await verifySessionAndRoute();
+    }
+});
+
+async function verifySessionAndRoute() {
+    try {
+        // Ping Go server auth verification endpoint
+        const response = await fetch("/api/auth/me", { method: "GET" });
+
+        if (response.status === 401 || response.status === 403) {
+            // Cookie missing or expired -> Force instant redirect to login
+            window.location.href = "/";
+        } else if (response.status >= 500) {
+            window.location.href = "/offline.html";
+        }
+    } catch (error) {
+        // Fetch failed completely -> Server is down/unreachable
+        console.error("Server unreachable:", error);
+        window.location.href = "/offline.html";
+    }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     const errorLabel = document.getElementById('error-label');
@@ -11,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let profileLoaded = false;
     let achievementsLoaded = false;
     let leaderboardLoaded = false;
+    let configurationLoaded = false;
     let currentLeaderboardPage = 1;
 
     // Display URL error params if present
@@ -37,7 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const activeContent = document.getElementById(targetTab);
             if (activeContent) activeContent.classList.add('active');
 
-            // PROFILE TAB (Set flag before fetch to prevent race conditions)
+            // PROFILE TAB
             if (targetTab === 'tab-profile' && !profileLoaded) {
                 profileLoaded = true;
                 await loadProfileTab();
@@ -54,6 +83,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 leaderboardLoaded = true;
                 await loadLeaderboardUser();
             }
+
+            // CONFIGURATION TAB
+            if (targetTab === 'tab-configuration' && !configurationLoaded) {
+                const tabConfigContainer = document.getElementById('tab-configuration');
+                try {
+                    const response = await fetch('configuration.html');
+                    if (!response.ok) throw new Error('Failed to load configuration.html');
+                    
+                    const html = await response.text();
+                    if (tabConfigContainer) tabConfigContainer.innerHTML = html;
+                    
+                    configurationLoaded = true; 
+                    
+                    initConfigTabEvents();
+                } catch (err) {
+                    console.error('Error loading configuration tab:', err);
+                    if (tabConfigContainer) {
+                        tabConfigContainer.innerHTML = '<p class="error">Failed to load configuration layout.</p>';
+                    }
+                }
+            }
         });
     });
 
@@ -65,7 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const htmlRes = await fetch('/profile.html');
             if (!htmlRes.ok) throw new Error(`HTML fetch failed: ${htmlRes.statusText}`);
-            tabProfileContainer.innerHTML = await htmlRes.text();
+            if (tabProfileContainer) tabProfileContainer.innerHTML = await htmlRes.text();
 
             let userData = getCachedJSON('user_stats');
 
@@ -83,20 +133,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 localStorage.setItem('user_stats', JSON.stringify(userData));
             }
 
-            document.getElementById('stat-player-id').textContent = userData.player_id || '--';
-            document.getElementById('stat-highest-level').textContent = userData.highest_player_level ?? 1;
-            document.getElementById('stat-levels').textContent = userData.total_levels_completed ?? 0;
-            document.getElementById('stat-enemies').textContent = userData.total_enemies_killed ?? 0;
-            document.getElementById('stat-xp').textContent = userData.total_xp_gained ?? 0;
-            document.getElementById('stat-damage-dealt').textContent = userData.total_damage_dealt ?? 0;
-            document.getElementById('stat-damage-taken').textContent = userData.total_damage_taken ?? 0;
-            document.getElementById('stat-deaths').textContent = userData.total_deaths ?? 0;
-            document.getElementById('stat-game-time').textContent = formatGameTime(userData.total_game_time);
+            const elPlayerId = document.getElementById('stat-player-id');
+            const elHighestLevel = document.getElementById('stat-highest-level');
+            const elLevels = document.getElementById('stat-levels');
+            const elEnemies = document.getElementById('stat-enemies');
+            const elXp = document.getElementById('stat-xp');
+            const elDmgDealt = document.getElementById('stat-damage-dealt');
+            const elDmgTaken = document.getElementById('stat-damage-taken');
+            const elDeaths = document.getElementById('stat-deaths');
+            const elGameTime = document.getElementById('stat-game-time');
+
+            if (elPlayerId) elPlayerId.textContent = userData.player_id || '--';
+            if (elHighestLevel) elHighestLevel.textContent = userData.highest_player_level ?? 1;
+            if (elLevels) elLevels.textContent = userData.total_levels_completed ?? 0;
+            if (elEnemies) elEnemies.textContent = userData.total_enemies_killed ?? 0;
+            if (elXp) elXp.textContent = userData.total_xp_gained ?? 0;
+            if (elDmgDealt) elDmgDealt.textContent = userData.total_damage_dealt ?? 0;
+            if (elDmgTaken) elDmgTaken.textContent = userData.total_damage_taken ?? 0;
+            if (elDeaths) elDeaths.textContent = userData.total_deaths ?? 0;
+            if (elGameTime) elGameTime.textContent = formatGameTime(userData.total_game_time);
 
         } catch (err) {
             console.error("[Profile Load Error]:", err);
-            profileLoaded = false; // Reset on failure to allow retry
-            tabProfileContainer.innerHTML = `<p class="profile-error">Unable to load profile stats.</p>`;
+            profileLoaded = false;
+            if (tabProfileContainer) {
+                tabProfileContainer.innerHTML = `<p class="profile-error">Unable to load profile stats.</p>`;
+            }
         }
     }
 
@@ -108,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const htmlRes = await fetch('/achievements.html');
             if (!htmlRes.ok) throw new Error(`HTML fetch failed: ${htmlRes.statusText}`);
-            tabAchievementsContainer.innerHTML = await htmlRes.text();
+            if (tabAchievementsContainer) tabAchievementsContainer.innerHTML = await htmlRes.text();
 
             let achievementsData = getCachedJSON('user_achievements');
 
@@ -130,7 +192,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.error("[Achievements Load Error]:", err);
             achievementsLoaded = false;
-            tabAchievementsContainer.innerHTML = `<p class="profile-error">Failed to load achievements.</p>`;
+            if (tabAchievementsContainer) {
+                tabAchievementsContainer.innerHTML = `<p class="profile-error">Failed to load achievements.</p>`;
+            }
         }
     }
 
@@ -150,7 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const data = await response.json();
             renderLeaderboardPayload(data);
-            currentLeaderboardPage = data.CurrentPage;
+            currentLeaderboardPage = data.CurrentPage || 1;
         } catch (err) {
             console.error("[Leaderboard Load Error]:", err);
             const tbody = document.getElementById('leaderboard-tbody');
@@ -171,7 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const data = await response.json();
             renderLeaderboardPayload(data);
-            currentLeaderboardPage = data.CurrentPage;
+            currentLeaderboardPage = data.CurrentPage || page;
         } catch (err) {
             console.error("[Leaderboard Load Error]:", err);
             const tbody = document.getElementById('leaderboard-tbody');
@@ -422,4 +486,207 @@ function formatGameTime(totalSeconds) {
     if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
 
     return parts.join(' ');
+}
+
+// ==========================================
+// CONFIGURATION TAB MANAGEMENT
+// ==========================================
+let configState = { master_volume: 100, sfx_volume: 100, keybinds: {} };
+let savedConfigState = { master_volume: 100, sfx_volume: 100, keybinds: {} };
+let activeRebindBtn = null;
+
+async function initConfigTabEvents() {
+    // Fetch saved server configuration
+    try {
+        const res = await fetch('/api/users/me/config');
+        if (res.ok) {
+            const serverConfig = await res.json();
+            configState = {
+                ...configState,
+                ...serverConfig,
+                keybinds: { ...configState.keybinds, ...(serverConfig.keybinds || {}) }
+            };
+            // Cache initial loaded state for "Reset Defaults / Revert" functionality
+            savedConfigState = structuredClone(configState);
+        }
+    } catch (e) {
+        console.warn("Using default config state:", e);
+    }
+
+    // Populate HTML with the current state
+    syncConfigUI();
+
+    // Sub-tab toggle logic
+    const subTabBtns = document.querySelectorAll('.config-subtab-btn');
+    const subContents = document.querySelectorAll('.config-subcontent');
+
+    subTabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-subtab');
+            subTabBtns.forEach(b => b.classList.remove('active'));
+            subContents.forEach(c => c.classList.remove('active'));
+
+            btn.classList.add('active');
+            const target = document.getElementById(targetId);
+            if (target) target.classList.add('active');
+        });
+    });
+
+    // Slider updates (Pending state)
+    const masterSlider = document.getElementById('master-volume');
+    const masterVal = document.getElementById('master-volume-val');
+    if (masterSlider) {
+        masterSlider.addEventListener('input', (e) => {
+            const val = parseInt(e.target.value, 10);
+            configState.master_volume = val;
+            if (masterVal) masterVal.textContent = `${val}%`;
+        });
+    }
+
+    const sfxSlider = document.getElementById('sfx-volume');
+    const sfxVal = document.getElementById('sfx-volume-val');
+    if (sfxSlider) {
+        sfxSlider.addEventListener('input', (e) => {
+            const val = parseInt(e.target.value, 10);
+            configState.sfx_volume = val;
+            if (sfxVal) sfxVal.textContent = `${val}%`;
+        });
+    }
+
+    // Click badge to start key capture
+    const keyBadges = document.querySelectorAll('.key-badge');
+    keyBadges.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (activeRebindBtn) activeRebindBtn.classList.remove('rebinding');
+
+            activeRebindBtn = btn;
+            btn.classList.add('rebinding');
+            btn.textContent = "PRESS...";
+        });
+    });
+
+    // Global keydown listener to capture rebinding input
+    document.addEventListener('keydown', (e) => {
+        if (!activeRebindBtn) return;
+        e.preventDefault();
+
+        const action = activeRebindBtn.getAttribute('data-action');
+        let pressedKey = e.key.toLowerCase();
+
+        // Allow Escape to cancel rebinding mode gracefully
+        if (e.key === "Escape") {
+            syncConfigUI();
+            activeRebindBtn = null;
+            return;
+        }
+
+        if (e.key === "Enter") {
+            syncConfigUI();
+            activeRebindBtn = null;
+            showConfigStatus("Enter cannot be assigned.", true);
+            return;
+        }
+
+        if (pressedKey.length > 1) {
+            syncConfigUI();
+            activeRebindBtn = null;
+            showConfigStatus("Modifier/special keys not allowed", true);
+            return;
+        }
+
+        if (!configState.keybinds) configState.keybinds = {};
+        configState.keybinds[action] = pressedKey;
+
+        activeRebindBtn.textContent = pressedKey.length === 1 ? pressedKey.toUpperCase() : pressedKey;
+        activeRebindBtn.classList.remove('rebinding');
+        activeRebindBtn = null;
+    });
+
+    // Cancel rebinding on outside click
+    document.addEventListener('click', () => {
+        if (activeRebindBtn) {
+            syncConfigUI();
+            activeRebindBtn = null;
+        }
+    });
+
+    // Reset Defaults / Revert Unsaved Changes
+    const btnReset = document.getElementById('btn-config-reset');
+    if (btnReset) {
+        btnReset.addEventListener('click', () => {
+            configState = structuredClone(savedConfigState);
+            syncConfigUI();
+            showConfigStatus("Reverted unsaved changes");
+        });
+    }
+
+    // Save Changes
+    const btnSave = document.getElementById('btn-config-save');
+    if (btnSave) {
+        btnSave.addEventListener('click', async () => {
+            showConfigStatus("Saving...");
+            try {
+                const response = await fetch('/api/users/me/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(configState)
+                });
+
+                if (!response.ok) {
+                    const errorMsg = await response.text();
+                    throw new Error(errorMsg.trim() || "Failed to save configuration");
+                }
+
+                const updatedConfig = await response.json();
+                
+                // Update both local state and baseline cache upon successful save
+                configState = structuredClone(updatedConfig);
+                savedConfigState = structuredClone(updatedConfig);
+
+                syncConfigUI();
+                showConfigStatus("Changes saved!");
+            } catch (err) {
+                console.error("Config save error:", err);
+                showConfigStatus(err.message, true);
+            }
+        });
+    }
+}
+
+// UI Sync Helper
+function syncConfigUI() {
+    const keyBadges = document.querySelectorAll('.key-badge');
+    keyBadges.forEach(btn => {
+        const action = btn.getAttribute('data-action');
+        if (configState.keybinds && configState.keybinds[action]) {
+            const key = configState.keybinds[action];
+            btn.textContent = key.length === 1 ? key.toUpperCase() : key;
+        }
+        btn.classList.remove('rebinding');
+    });
+
+    const masterSlider = document.getElementById('master-volume');
+    const masterVal = document.getElementById('master-volume-val');
+    if (masterSlider && configState.master_volume !== undefined) {
+        masterSlider.value = configState.master_volume;
+        if (masterVal) masterVal.textContent = `${configState.master_volume}%`;
+    }
+
+    const sfxSlider = document.getElementById('sfx-volume');
+    const sfxVal = document.getElementById('sfx-volume-val');
+    if (sfxSlider && configState.sfx_volume !== undefined) {
+        sfxSlider.value = configState.sfx_volume;
+        if (sfxVal) sfxVal.textContent = `${configState.sfx_volume}%`;
+    }
+}
+
+function showConfigStatus(msg, isError = false) {
+    const statusMsg = document.getElementById('config-status-msg');
+    if (!statusMsg) return;
+    statusMsg.textContent = msg;
+    statusMsg.style.color = isError ? "#ef4444" : "#34d399";
+    setTimeout(() => {
+        if (statusMsg.textContent === msg) statusMsg.textContent = "";
+    }, 3000);
 }

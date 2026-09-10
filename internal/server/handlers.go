@@ -245,45 +245,21 @@ func (server *Server) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 	})
 
 	json.NewEncoder(w).Encode(map[string]string{
-		"status":   "ok",
+		"status":   "ok", // <------
 		"redirect": "/lobby.html",
 	})
-}
-
-func (server *Server) HandleGetUser(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	targetPlayerID := r.PathValue("id")
-	if targetPlayerID == "" {
-		http.Error(w, "Missing player ID", http.StatusBadRequest)
-		return
-	}
-
-	_, _, err := ExtractSessionIDs(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	user, err := server.db.FetchUserSummary(r.Context(), targetPlayerID)
-	if err != nil {
-		http.Error(w, "Player not found", http.StatusNotFound)
-		return
-	}
-
-	json.NewEncoder(w).Encode(user)
 }
 
 func (server *Server) HandleGetSelf(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	_, playerID, err := ExtractSessionIDs(r)
+	userID, playerID, err := ExtractSessionIDs(r)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	user, err := server.db.FetchUserSummary(r.Context(), playerID)
+	user, err := server.db.FetchUserSummary(r.Context(), userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -479,4 +455,84 @@ func ExtractSessionIDs(r *http.Request) (userID, playerID string, err error) {
 	}
 
 	return parts[0], parts[1], nil
+}
+func (server *Server) HandleGetSelfConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userIDStr, playerID, err := ExtractSessionIDs(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format in session", http.StatusUnauthorized)
+		return
+	}
+
+	log.Printf("[DEBUG] FETCHING USER Configuration FOR PLAYER: uid: %s, pid: %s", userID, playerID)
+
+	userConfig, err := server.db.FetchUserConfiguration(r.Context(), userID)
+	if err != nil {
+		log.Printf("Error fetching config: %s", err)
+	}
+
+	server.mu.Lock()
+	server.playerUsers[playerID] = userID
+	server.mu.Unlock()
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(userConfig)
+}
+func (server *Server) HandleUpdateSelfConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Not allowed", http.StatusMethodNotAllowed)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	userIDStr, playerID, err := ExtractSessionIDs(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format in session", http.StatusUnauthorized)
+		return
+	}
+	var userConfig db.UserConfiguration
+
+	err = json.NewDecoder(r.Body).Decode(&userConfig)
+	if err != nil {
+		http.Error(w, "Sent config is wrong format", http.StatusBadRequest)
+		return
+	}
+	seenKeys := make(map[string]string)
+
+	for action, key := range userConfig.Keybinds {
+		runes := []rune(key)
+		if len(runes) != 1 {
+			http.Error(w, fmt.Sprintf("Keybinding for '%s' must be exactly 1 character", action), http.StatusBadRequest)
+			return
+		}
+
+		if existingAction, exists := seenKeys[key]; exists {
+			http.Error(w, fmt.Sprintf("Key '%s' cannot be assigned to '%s' (already bound to '%s')", key, action, existingAction), http.StatusBadRequest)
+			return
+		}
+
+		seenKeys[key] = action
+	}
+
+	log.Printf("[DEBUG] Updating USER Configuration FOR PLAYER: uid: %s, pid: %s", userID, playerID)
+
+	err = server.db.UpsertUserConfiguration(r.Context(), userID, userConfig)
+	if err != nil {
+		log.Printf("Error fetching config: %s", err)
+	}
+
+	server.mu.Lock()
+	server.playerUsers[playerID] = userID
+	server.mu.Unlock()
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(userConfig)
 }

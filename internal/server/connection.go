@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
+	"uuid"
 
 	"unnamed-game/internal/game"
 
@@ -32,11 +34,21 @@ func (server *Server) InitializeConnection(g *game.Game, username string) error 
 }
 
 func (server *Server) RegisterPlayer(g *game.Game, playerID string, conn *WSConnection) error {
+	userID, err := uuid.Parse(conn.UserID)
+	if err != nil {
+		return errors.New("Invalid user ID format in session")
+	}
+	userConfig, err := server.db.FetchUserConfiguration(conn.Ctx, userID)
+	if err != nil {
+		return errors.New(err.Error())
+	}
+
 	respChan := make(chan error, 1)
 	g.EventChan <- game.GameEvent{
 		Type:     game.EventTypeConnect,
 		PlayerID: playerID,
 		RespChan: respChan,
+		Object:   userConfig.Keybinds,
 	}
 
 	if err := <-respChan; err != nil {

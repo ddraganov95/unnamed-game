@@ -25,6 +25,7 @@ type GameEvent struct {
 	PlayerID string
 	Key      rune
 	RespChan chan error
+	Object   any
 }
 type ServerEvent struct {
 	Type     EventType
@@ -37,20 +38,34 @@ type ServerEvent struct {
 func (player *Player) EnqueueKey(r rune) {
 	player.KeyQueue = append(player.KeyQueue, r)
 }
-func (player *Player) InitKeybindings() {
-	// Potentially this should be the keybinds from the player config. However, for now, we will hardcode them.
-	player.KeyBindings = map[rune]func(g *Game){
-		'w':  player.MoveUp,
-		's':  player.MoveDown,
-		'a':  player.MoveLeft,
-		'd':  player.MoveRight,
-		'f':  player.Attack,
-		'q':  player.QuitGame,
-		'e':  player.ChangeEquippedAttack,
-		'\r': player.ChangeTypeState,
-		' ':  player.GetNextLevel,
-		'c':  player.CopyGameId,
+
+func (player *Player) InitKeybindings(playerKeybinds map[string]string) {
+	// Map JSON config keys to player action methods
+	nameToMethod := map[string]func(g *Game){
+		"move_up":      player.MoveUp,
+		"move_down":    player.MoveDown,
+		"move_left":    player.MoveLeft,
+		"move_right":   player.MoveRight,
+		"attack_enemy": player.Attack,
+		"quit_game":    player.QuitGame,
+		"swap_attack":  player.ChangeEquippedAttack,
 	}
+
+	finalKeybinds := make(map[rune]func(g *Game))
+
+	// Dynamically assign configured keybindings
+	for configKey, method := range nameToMethod {
+		if str, ok := playerKeybinds[configKey]; ok && len(str) > 0 {
+			char := []rune(str)[0] // Convert 1-char string to rune
+			finalKeybinds[char] = method
+		}
+	}
+
+	finalKeybinds['\r'] = player.ChangeTypeState
+	finalKeybinds[' '] = player.GetNextLevel
+	finalKeybinds['c'] = player.CopyGameId
+
+	player.KeyBindings = finalKeybinds
 }
 func (player *Player) InitTypingKeybindings() {
 	// Potentially this should be the keybinds from the player config. However, for now, we will hardcode them.
@@ -170,7 +185,7 @@ EventLoop:
 			switch event.Type {
 			case EventTypeConnect:
 				log.Printf("[DEBUG] Conn %s ", event.PlayerID)
-				err := game.HandlePlayerConnect(event.PlayerID)
+				err := game.HandlePlayerConnect(event)
 				event.RespChan <- err
 			case EventTypeDisconnect:
 				log.Printf("[DEBUG] Disco %s ", event.PlayerID)
