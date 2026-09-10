@@ -19,12 +19,12 @@ import (
 type Server struct {
 	PlayerCounter  uint64
 	Upgrader       websocket.Upgrader
-	mu             sync.Mutex
-	activeConns    map[string]*websocket.Conn // Tracks the active GameWebSocket per player ID
-	activeGames    map[uuid.UUID]*game.Game   // Map gameid -> game
-	playerSessions map[string]uuid.UUID       // Map String playerid -> gameid
-	playerUsers    map[string]uuid.UUID       // Map String playerid -> userid
-	lobbyConns     map[*websocket.Conn]bool   // Tracks active LobbyWebSockets
+	mu             sync.RWMutex
+	activeConns    map[string]*WSConnection // Tracks the active GameWebSocket per player ID
+	activeGames    map[uuid.UUID]*game.Game // Map gameid -> game
+	playerSessions map[string]uuid.UUID     // Map String playerid -> gameid
+	playerUsers    map[string]uuid.UUID     // Map String playerid -> userid
+	lobbyConns     map[*websocket.Conn]bool // Tracks active LobbyWebSockets
 	chatHistory    []string
 	achievementCat *game.AchievementCatalog
 	globalChat     chan string
@@ -33,7 +33,13 @@ type Server struct {
 	Mux            *http.ServeMux
 	httpServer     *http.Server
 }
-
+type WSConnection struct {
+	Conn     *websocket.Conn
+	Ctx      context.Context
+	Cancel   context.CancelFunc
+	UserID   string
+	PlayerID string
+}
 type OutboundWSMessage struct {
 	Type    string `json:"type"`
 	Payload string `json:"payload"`
@@ -75,7 +81,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 				return true
 			},
 		},
-		activeConns:    make(map[string]*websocket.Conn),
+		activeConns:    make(map[string]*WSConnection),
 		activeGames:    make(map[uuid.UUID]*game.Game),
 		playerSessions: make(map[string]uuid.UUID),
 		lobbyConns:     make(map[*websocket.Conn]bool),

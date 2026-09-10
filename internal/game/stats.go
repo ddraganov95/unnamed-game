@@ -2,6 +2,8 @@ package game
 
 import (
 	"fmt"
+	"reflect"
+	"strings"
 	"time"
 )
 
@@ -72,8 +74,12 @@ func (player *Player) GenerateSummary() PlayerSessionSummary {
 		Score:           score,
 	}
 }
-func GetSummaryLines(summary PlayerSessionSummary) []string {
+func GetSummaryLines(summary PlayerSessionSummary, quitKey string) []string {
 	duration := summary.SessionDuration.Truncate(time.Second).String()
+	if quitKey == "" {
+		quitKey = "Q"
+	}
+
 	return []string{
 		"+--------------------------------------------------------+",
 		"|                     Level Complete                     |",
@@ -91,19 +97,23 @@ func GetSummaryLines(summary PlayerSessionSummary) []string {
 		fmt.Sprintf("| Score:          %-38d |", summary.Score),
 		"+--------------------------------------------------------+",
 		"|               Press [SPACE] to continue                |",
-		"|                Press [Q] to quit game                  |",
-		"|              Press [C] to copy Game ID                 |",
+		fmt.Sprintf("|               Press [%1s] to exit game                  |", quitKey),
 		"+--------------------------------------------------------+",
 	}
 }
-func GetGameOverSummaryLines(summary PlayerSessionSummary) []string {
-	duration := summary.SessionDuration.Truncate(time.Second)
+
+func GetGameOverSummaryLines(summary PlayerSessionSummary, quitKey string) []string {
+	duration := summary.SessionDuration.Truncate(time.Second).String()
+	if quitKey == "" {
+		quitKey = "Q"
+	}
+
 	return []string{
 		"+--------------------------------------------------+",
 		"|                    GAME OVER                     |",
 		"+--------------------------------------------------+",
 		fmt.Sprintf("| Adventurer:     %-32s |", summary.PlayerID),
-		fmt.Sprintf("| Playtime:       %-32v |", duration),
+		fmt.Sprintf("| Playtime:       %-32s |", duration),
 		"+--------------------------------------------------+",
 		fmt.Sprintf("| Levels Cleared: %-32d |", summary.LevelsCompleted),
 		fmt.Sprintf("| Enemies Slain:  %-32d |", summary.EnemiesKilled),
@@ -113,7 +123,18 @@ func GetGameOverSummaryLines(summary PlayerSessionSummary) []string {
 		fmt.Sprintf("| Damage Taken:   %-32d |", summary.DamageTaken),
 		fmt.Sprintf("| Score:          %-32d |", summary.Score),
 		"+--------------------------------------------------+",
-		"|             Press [Q] to exit game...            |",
+		fmt.Sprintf("|             Press [%1s] to exit game...            |", quitKey),
 		"+--------------------------------------------------+",
 	}
+}
+func (player *Player) GetQuitKey() string {
+	targetPtr := reflect.ValueOf(player.QuitGame).Pointer()
+
+	for r, fn := range player.KeyBindings {
+		if reflect.ValueOf(fn).Pointer() == targetPtr {
+			return strings.ToUpper(string(r))
+		}
+	}
+
+	return "Q"
 }

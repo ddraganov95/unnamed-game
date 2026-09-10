@@ -53,7 +53,7 @@
             if (data.achievements) {
                 localStorage.setItem('user_achievements', JSON.stringify(data.achievements));
             }
-
+            
             window.location.href = "/lobby.html";
             return; // Prevent rendering JSON payload inside xterm
         }

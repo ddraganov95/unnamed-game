@@ -184,3 +184,18 @@ func ScanSingleRow[T any](rows pgx.Rows) (T, error) {
 	}
 	return result, nil
 }
+func (db *Database) CallFunction(ctx context.Context, name string, args ...any) error {
+	placeholders := make([]string, len(args))
+	for i := range args {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+
+	query := fmt.Sprintf("SELECT %s(%s);", name, strings.Join(placeholders, ", "))
+
+	_, err := db.Pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("function call failed (%s): %w", name, err)
+	}
+
+	return nil
+}

@@ -159,7 +159,7 @@ func (game *Game) DrawLevelIntermissionForPlayer(level Level, player *Player) st
 	if player != nil {
 		summary = player.GenerateSummary()
 	}
-	return game.DrawSummaryScreenForPlayer(level, player, GetSummaryLines(summary))
+	return game.DrawSummaryScreenForPlayer(level, player, GetSummaryLines(summary, player.GetQuitKey()))
 }
 
 func (game *Game) DrawGameOverForPlayer(level Level, player *Player) string {
@@ -167,7 +167,7 @@ func (game *Game) DrawGameOverForPlayer(level Level, player *Player) string {
 	if player != nil {
 		summary = player.GenerateSummary()
 	}
-	return game.DrawSummaryScreenForPlayer(level, player, GetGameOverSummaryLines(summary))
+	return game.DrawSummaryScreenForPlayer(level, player, GetGameOverSummaryLines(summary, player.GetQuitKey()))
 }
 func (game *Game) SpawnPlayer(player *Player) {
 	//Check if the player is already in the slice so level transitions don't duplicate them
@@ -415,15 +415,15 @@ func (g *Game) GetActivePlayerById(playerId string) (*Player, bool) {
 	}
 	return nil, false
 }
-func (game *Game) HandlePlayerConnect(playerID string) error {
+func (game *Game) HandlePlayerConnect(event GameEvent) error {
 	log.Println("[DEBUG] Player Connecting")
-	if player, exists := game.GetPlayerByID(playerID); exists {
+	if player, exists := game.GetPlayerByID(event.PlayerID); exists {
 		log.Println("[DEBUG] Existing Player Connecting")
 		//Same level reconnecting try same position
 		if game.LevelNumber-1 == player.LevelsCompleted {
 			//Try restoring exact position
 			if !game.Level.PutEntityAtPosition(player, player.GetPosition()) {
-				log.Printf("[DEBUG] Old position blocked for %s, falling back to spawn", playerID)
+				log.Printf("[DEBUG] Old position blocked for %s, falling back to spawn", event.PlayerID)
 				game.SpawnPlayer(player)
 			}
 		} else {
@@ -433,7 +433,11 @@ func (game *Game) HandlePlayerConnect(playerID string) error {
 		player.PlayerState = StatePlaying
 	} else {
 		log.Println("[DEBUG] New Player Connecting")
-		player := NewPlayer(playerID)
+		keybinds, ok := event.Object.(map[string]string)
+		if !ok {
+			log.Printf("[ERROR] Expected map[string]rune in event.Object, got %T", event.Object)
+		}
+		player := NewPlayer(event.PlayerID, keybinds)
 		player.GameID = game.GameId.String()
 		log.Printf("[DEBUG] New Player Game id: %s", player.GameID)
 		game.SpawnPlayer(player)

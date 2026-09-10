@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
+	"uuid"
 
 	"unnamed-game/internal/game"
 
@@ -22,7 +24,7 @@ func (server *Server) InitializeConnection(g *game.Game, username string) error 
 
 	if exists && oldConn != nil {
 		fmt.Printf("Player %s reconnecting. Closing old connection.\n", username)
-		oldConn.Close()
+		oldConn.Conn.Close()
 	}
 
 	g.Mu.RLock()
@@ -31,21 +33,31 @@ func (server *Server) InitializeConnection(g *game.Game, username string) error 
 	return nil
 }
 
-func (server *Server) RegisterPlayer(g *game.Game, playerID string, conn *websocket.Conn) error {
+func (server *Server) RegisterPlayer(g *game.Game, playerID string, conn *WSConnection) error {
+	userID, err := uuid.Parse(conn.UserID)
+	if err != nil {
+		return errors.New("Invalid user ID format in session")
+	}
+	userConfig, err := server.db.FetchUserConfiguration(conn.Ctx, userID)
+	if err != nil {
+		return errors.New(err.Error())
+	}
+
 	respChan := make(chan error, 1)
 	g.EventChan <- game.GameEvent{
 		Type:     game.EventTypeConnect,
 		PlayerID: playerID,
 		RespChan: respChan,
+		Object:   userConfig.Keybinds,
 	}
 
 	if err := <-respChan; err != nil {
 		return err
 	}
 
-	server.mu.Lock()
+	server.mu.RLock()
 	server.activeConns[playerID] = conn
-	server.mu.Unlock()
+	server.mu.RUnlock()
 	return nil
 }
 
@@ -113,9 +125,9 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			return
 
 		case game.EventTypeCopyGame:
-			if conn, exists := server.activeConns[event.PlayerID]; exists {
-				server.mu.Lock()
-				conn.WriteJSON(OutboundWSMessage{
+			server.mu.Lock()
+			if connection, exists := server.activeConns[event.PlayerID]; exists {
+				connection.Conn.WriteJSON(OutboundWSMessage{
 					Type:    "copy_clipboard",
 					Payload: event.Value,
 				})
@@ -131,7 +143,7 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			log.Printf("[ACHIEVEMENT DB] Triggering unlock for User: %s | Ach: %v", userID, event.Value)
 
 			//ALWAYS capture and log the error returned by CallProcedure
-			if err := server.db.CallProcedure(context.Background(), "player_achievement_unlock", userID, event.Value); err != nil {
+			if err := server.db.CallFunction(context.Background(), "player_achievement_unlock", userID, event.Value); err != nil {
 				log.Printf("[ACHIEVEMENT DB ERROR] Failed to unlock achievement for user %s: %v", userID, err)
 			} else {
 				log.Printf("[ACHIEVEMENT DB SUCCESS] Successfully persisted unlock for user %s", userID)
@@ -144,17 +156,23 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			}
 
 		case game.EventTypeGlobalChatMsg:
-			server.BroadcastGlobalChat(event.PlayerID, event.Value)
+			connection, exists := server.activeConns[event.PlayerID]
+			if !exists {
+				log.Printf("[SERVER ERROR] No connection found for player %s", event.PlayerID)
+				continue
+			}
+			server.SendGlobalChatToDB(connection.Ctx, event.PlayerID, event.Value)
 		case game.EventTypeGameChatMsg:
 			g.BroadcastGameChat(event.PlayerID, event.Value)
+		default:
 		}
 	}
 
 }
 func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string) {
-	server.mu.Lock()
-	conn, exists := server.activeConns[playerID]
-	server.mu.Unlock()
+	server.mu.RLock()
+	connection, exists := server.activeConns[playerID]
+	server.mu.RUnlock()
 	if !exists {
 		log.Printf("[WARN] No active connection found for player %s on disconnect\n", playerID)
 		return
@@ -188,7 +206,7 @@ func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string)
 		log.Printf("[DB] Successfully saved session summary for %s\n", playerID)
 		log.Printf("[DB] Rank for player %s: %d\n", playerID, user.Rank)
 		if exists {
-			conn.WriteJSON(map[string]any{
+			connection.Conn.WriteJSON(map[string]any{
 				"type":         "session_summary",
 				"user":         user,
 				"achievements": achievementPayload,
@@ -196,16 +214,16 @@ func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string)
 			log.Printf("[DB] Successfully SENT session summary for %s\n", playerID)
 		}
 	}
-	server.DisconnectPlayer(g, playerID, conn)
+	server.DisconnectPlayer(g, playerID, connection)
 }
-func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn *websocket.Conn) {
+func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn *WSConnection) {
 	server.mu.Lock()
-	if activeConn, exists := server.activeConns[playerID]; exists && activeConn == targetConn {
+	if activeConn, exists := server.activeConns[playerID]; exists && activeConn.Conn == targetConn.Conn {
 		delete(server.activeConns, playerID)
 	}
 	server.mu.Unlock()
 
-	targetConn.Close()
+	targetConn.Conn.Close()
 
 	g.EventChan <- game.GameEvent{
 		Type:     game.EventTypeDisconnect,
@@ -213,37 +231,47 @@ func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn
 	}
 }
 func (server *Server) ListenToDBEvents(ctx context.Context) {
-	connConfig := server.db.Pool.Config().ConnConfig
-	conn, err := pgx.ConnectConfig(ctx, connConfig)
-	if err != nil {
-		log.Printf("[DB ERROR] Failed to connect for listening to events: %v", err)
-		return
-	}
-	defer conn.Close(ctx)
-
-	dbEvents := []string{"achievement_unlocked"}
-	for _, event := range dbEvents {
-		if _, err := conn.Exec(ctx, fmt.Sprintf("LISTEN %s", event)); err != nil {
-			log.Printf("[DB ERROR] Failed to listen to event %s: %v", event, err)
-			return
-		}
-	}
 	for {
-		notification, err := conn.WaitForNotification(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		connConfig := server.db.Pool.Config().ConnConfig
+		conn, err := pgx.ConnectConfig(ctx, connConfig)
 		if err != nil {
-			if ctx.Err() != nil {
-				log.Printf("[DB ERROR] Context error while waiting for notification: %v", err)
-			} else {
-				log.Printf("[DB ERROR] Error while waiting for notification: %v", err)
-			}
+			log.Printf("[DB ERROR] Failed to connect for listening to events: %v", err)
 			return
 		}
-		switch notification.Channel {
-		case "achievement_unlocked":
-			log.Printf("[DB EVENT] Received notification for achievement unlocked: %s", notification.Payload)
-			server.handleAchievementUnlockedEvent(notification.Payload)
-		default:
-			log.Printf("[DB EVENT] Received notification for unknown channel: %s", notification.Channel)
+		defer conn.Close(ctx)
+
+		dbEvents := []string{"achievement_unlocked", "global_chat"}
+		for _, event := range dbEvents {
+			if _, err := conn.Exec(ctx, fmt.Sprintf("LISTEN %s", event)); err != nil {
+				log.Printf("[DB ERROR] Failed to listen to event %s: %v", event, err)
+				return
+			}
+		}
+		for {
+			notification, err := conn.WaitForNotification(ctx)
+			if err != nil {
+				if ctx.Err() != nil {
+					log.Printf("[DB ERROR] Context error while waiting for notification: %v", err)
+				} else {
+					log.Printf("[DB ERROR] Error while waiting for notification: %v", err)
+				}
+				return
+			}
+			switch notification.Channel {
+			case "achievement_unlocked":
+				log.Printf("[DB EVENT] Received notification for achievement unlocked: %s", notification.Payload)
+				server.handleAchievementUnlockedEvent(notification.Payload)
+			case "global_chat":
+				log.Printf("[DB EVENT] Received notification for message: %s", notification.Payload)
+				server.BroadcastGlobalMessage(notification.Payload)
+			default:
+				log.Printf("[DB EVENT] Received notification for unknown channel: %s", notification.Channel)
+			}
 		}
 	}
 }

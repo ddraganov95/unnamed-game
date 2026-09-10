@@ -141,7 +141,7 @@ func (player *Player) GetSymbol() rune {
 func (p *Player) IsAlive() bool {
 	return p.CurrentHealth > 0
 }
-func NewPlayer(id string) *Player {
+func NewPlayer(id string, keybinds map[string]string) *Player {
 	player := &Player{
 		ID:            id,
 		CurrentHealth: 100, MaxHealth: 100,
@@ -155,7 +155,7 @@ func NewPlayer(id string) *Player {
 	}
 	player.Experience = Experience{Level: 1, ExperienceVal: 0}
 	player.UnlockAttacks()
-	player.InitKeybindings()
+	player.InitKeybindings(keybinds)
 	player.InitTypingKeybindings()
 
 	return player

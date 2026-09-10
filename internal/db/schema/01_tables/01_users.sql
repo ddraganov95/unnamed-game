@@ -14,4 +14,3 @@ total_enemies_killed int DEFAULT 0,
 total_achievement_points int DEFAULT 0,
 highest_score int DEFAULT 0
 );
-ALTER TABLE users ADD COLUMN IF NOT EXISTS highest_score INT DEFAULT 0;

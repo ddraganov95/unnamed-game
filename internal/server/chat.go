@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -32,10 +33,21 @@ func (server *Server) BroadcastGlobalMessage(msg string) {
 	default:
 	}
 }
-func (server *Server) BroadcastGlobalChat(playerid string, message string) {
-	msg := fmt.Sprintf("[%s]: %s", playerid, message)
-	log.Println(msg)
-	server.BroadcastGlobalMessage(msg)
+func (server *Server) SendGlobalChatToDB(ctx context.Context, playerId string, message string) {
+	server.mu.RLock()
+	userId, exists := server.playerUsers[playerId]
+	server.mu.RUnlock()
+	if !exists {
+		log.Printf("[DEBUG] PlayerID: %s could not be matched to UserID. Message: %s not sent", userId, message)
+		return
+	}
+	msgBroadcasted := fmt.Sprintf("[%s]: %s", playerId, message)
+	log.Println(msgBroadcasted)
+
+	err := server.db.CallFunction(ctx, "global_chat_message_send", userId, message, msgBroadcasted)
+	if err != nil {
+		log.Printf("Mesage not sent. Reason: %s", err)
+	}
 }
 
 type AchievementNotificationPayload struct {
