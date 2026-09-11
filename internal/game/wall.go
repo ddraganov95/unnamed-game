@@ -1,41 +1,20 @@
 package game
 
-type TopWall struct {
+type Wall struct {
 	Entity
-}
-type SideWall struct {
-	Entity
+	Symbol rune
 }
 
-func (wall *TopWall) GetSymbol() rune {
-	return SymbolTopWall
+func (w *Wall) GetSymbol() rune {
+	return w.Symbol
 }
-func (wall *SideWall) GetSymbol() rune {
-	return SymbolSideWall
-}
-func CreateTopWall(id string, pos Position) GameObject {
 
-	return &TopWall{
+func CreateWall(id string, pos Position) GameObject {
+	return &Wall{
 		ID:       id,
 		Position: pos,
+		Blocker:  true,
+		Team:     TeamEnvironment,
+		Symbol:   SymbolWallDefault,
 	}
-}
-func CreateSideWall(id string, pos Position) GameObject {
-	return &SideWall{
-		ID:       id,
-		Position: pos,
-	}
-}
-
-func (wall *TopWall) IsBlocking() bool {
-	return true
-}
-func (wall *SideWall) IsBlocking() bool {
-	return true
-}
-func (wall *TopWall) IsEnemy() bool {
-	return false
-}
-func (wall *SideWall) IsEnemy() bool {
-	return false
 }

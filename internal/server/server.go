@@ -17,26 +17,26 @@ import (
 )
 
 type Server struct {
-	PlayerCounter  uint64
-	Upgrader       websocket.Upgrader
 	mu             sync.RWMutex
-	activeConns    map[string]*WSConnection // Tracks the active GameWebSocket per player ID
-	activeGames    map[uuid.UUID]*game.Game // Map gameid -> game
-	playerSessions map[string]uuid.UUID     // Map String playerid -> gameid
-	playerUsers    map[string]uuid.UUID     // Map String playerid -> userid
-	lobbyConns     map[*websocket.Conn]bool // Tracks active LobbyWebSockets
-	chatHistory    []string
-	achievementCat *game.AchievementCatalog
-	globalChat     chan string
 	lobbyMu        sync.Mutex
+	Upgrader       websocket.Upgrader
+	chatHistory    []string
+	activeConns    map[string]*WSConnection
+	activeGames    map[uuid.UUID]*game.Game
+	playerSessions map[string]uuid.UUID
+	playerUsers    map[string]uuid.UUID
+	lobbyConns     map[*websocket.Conn]bool
+	achievementCat *game.AchievementCatalog
 	db             *db.Database
 	Mux            *http.ServeMux
 	httpServer     *http.Server
+	globalChat     chan string
+	PlayerCounter  uint64
 }
 type WSConnection struct {
-	Conn     *websocket.Conn
 	Ctx      context.Context
 	Cancel   context.CancelFunc
+	Conn     *websocket.Conn
 	UserID   string
 	PlayerID string
 }
@@ -91,6 +91,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 		db:             database,
 		achievementCat: catalog,
 	}
+	game.InitGameRegistries()
 	go srv.ListenToDBEvents(ctx)
 	return srv, nil
 }

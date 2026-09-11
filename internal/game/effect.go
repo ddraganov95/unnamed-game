@@ -7,7 +7,7 @@ type HitEffect struct {
 
 func CreateHitEffect(id string, pos Position, timer int) *HitEffect {
 	return &HitEffect{
-		Entity: CreateEntity(id, pos),
+		Entity: CreateEntity(id, pos, TeamEnvironment),
 		timer:  timer,
 	}
 }

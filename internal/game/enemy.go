@@ -9,13 +9,17 @@ type Enemy struct {
 	Entity
 	Health
 	Speed
-	Experience
 	Direction
 	LastDamageRecieved Damage
+	VoiceLine          string
 	DamageMultiplier   float64
+	ExperienceVal      int
+	Score              int
+	ProjectileSpeed    int
 	EquippedAttack     int
 	AggroRange         int
 	EnemyType          EnemyType
+	Symbol             rune
 }
 type EnemyType uint8
 
@@ -25,22 +29,46 @@ const (
 	EnemyArcher
 )
 
-type Goblin struct {
-	Enemy
+var EnemyBlueprints map[EnemyType]Enemy
+
+func InitEnemyBlueprints() {
+	EnemyBlueprints = map[EnemyType]Enemy{
+		EnemyGoblin: {
+			MaxHealth:        200,
+			Symbol:           SymbolGoblin,
+			Score:            5,
+			ExperienceVal:    GoblinDefaultExperience,
+			EquippedAttack:   AttackBasic,
+			MaxMovementSpeed: EnemyDefaultMovementSpeed,
+			MaxAttackSpeed:   EnemyDefaultAttackSpeed,
+			ProjectileSpeed:  ProjectileDefaultTravelSpeed,
+			DamageMultiplier: float64(EnemyDefaultDamageMultipier-70) / 100.0,
+		},
+		EnemyArcher: {
+			MaxHealth:        50,
+			Symbol:           SymbolArcher,
+			Score:            7,
+			ExperienceVal:    ArcherDefaultExperience,
+			EquippedAttack:   AttackArrow,
+			MaxMovementSpeed: EnemyDefaultMovementSpeed + 40,
+			MaxAttackSpeed:   EnemyDefaultAttackSpeedRanged,
+			ProjectileSpeed:  ProjectileDefaultTravelSpeed * 15,
+			DamageMultiplier: float64(EnemyDefaultDamageMultipier-30) / 100.0,
+			VoiceLine:        "STOP HITTING ME!!!!",
+		},
+	}
 }
-type Archer struct {
-	Enemy
-}
+
 type PathNode struct {
 	pos       Position
 	firstStep Direction
 }
 type SpawnRule struct {
-	Create    func(countEnemy int, pos Position) GameObject
 	CalcCount func(playerLevel int) int
 	Count     int
 	MinLevel  int
 	MaxLevel  int
+	EnemyType EnemyType
 }
 
 var GlobalSpawnRules []SpawnRule
@@ -48,13 +76,13 @@ var GlobalSpawnRules []SpawnRule
 func InitSpawnRules() {
 	GlobalSpawnRules = []SpawnRule{
 		{
-			Create:    CreateGoblin,
+			EnemyType: EnemyGoblin,
 			CalcCount: CalculateGoblinsPerLevel,
 			MinLevel:  1,
 			MaxLevel:  50,
 		},
 		{
-			Create:    CreateArcher,
+			EnemyType: EnemyArcher,
 			CalcCount: CalculateArchersPerLevel,
 			MinLevel:  4,
 			MaxLevel:  100,
@@ -67,13 +95,26 @@ func (enemy *Enemy) IsAlive() bool {
 func (enemy *Enemy) GetLastDamageTakenFrom() string {
 	return enemy.LastDamageRecieved.EntityID
 }
-func CreateEnemy(id string, pos Position, health Health, kind EnemyType) Enemy {
-	return Enemy{
-		Entity:     CreateEntity(id, pos),
-		Health:     health,
-		AggroRange: EnemyDefaultAggroRange,
-		EnemyType:  kind,
+func CreateEnemy(id string, pos Position, kind EnemyType) *Enemy {
+	bp := EnemyBlueprints[kind]
+	e := &Enemy{
+		ID:               id,
+		Position:         pos,
+		Blocker:          true,
+		Team:             TeamEnemy,
+		Health:           CreateHealth(bp.MaxHealth),
+		AggroRange:       EnemyDefaultAggroRange,
+		EnemyType:        kind,
+		Symbol:           bp.Symbol,
+		Score:            bp.Score,
+		EquippedAttack:   bp.EquippedAttack,
+		DamageMultiplier: bp.DamageMultiplier,
+		ProjectileSpeed:  bp.ProjectileSpeed,
+		VoiceLine:        bp.VoiceLine,
 	}
+	e.ExperienceVal = bp.ExperienceVal
+	e.SetSpeed(bp.MaxMovementSpeed, bp.MaxAttackSpeed)
+	return e
 }
 func (enemy *Enemy) Update(game *Game) {
 	UpdateEnemy(game, enemy)
@@ -81,108 +122,42 @@ func (enemy *Enemy) Update(game *Game) {
 func (t EnemyType) String() string {
 	switch t {
 	case EnemyGoblin:
-		return "goblin"
+		return "Goblin"
 	case EnemyArcher:
-		return "archer"
+		return "Archer"
 	default:
 		return "unknown"
 	}
 }
-func (goblin *Goblin) Update(game *Game) {
-	UpdateEnemy(game, goblin)
-}
-func (archer *Archer) Update(game *Game) {
-	UpdateEnemy(game, archer)
-}
-func (goblin *Goblin) GetSymbol() rune {
-	return SymbolGoblin
-}
-func (archer *Archer) GetSymbol() rune {
-	return SymbolArcher
-}
-func (goblin *Goblin) GetType() string {
-	return "goblin"
+func (enemy *Enemy) GetSymbol() rune {
+	return enemy.Symbol
 }
 
-func (archer *Archer) GetType() string {
-	return "archer"
-}
-func (enemy *Enemy) GetType() string {
-	return "enemy"
-}
 func (enemy *Enemy) GetScore() int {
-	switch enemy.EnemyType {
-	case EnemyGoblin:
-		return 5
-	case EnemyArcher:
-		return 7
-	}
-	return 1
+	return enemy.Score
 }
-func CreateArcher(countArcher int, pos Position) GameObject {
-	id := fmt.Sprintf("Archer %d", countArcher)
-	archer := &Archer{
-		Enemy: CreateEnemy(id, pos, CreateHealth(50), EnemyArcher),
-	}
-	archer.ExperienceVal = ArcherDefaultExperience
-	archer.EquippedAttack = AttackArrow
-	archer.SetSpeed(EnemyDefaultMovementSpeed+40, EnemyDefaultAttackSpeedRanged)
-	return archer
+func (enemy *Enemy) Move(game *Game) bool {
+	return MoveEnemyGeneric(game, enemy)
 }
-func CreateGoblin(countGoblin int, pos Position) GameObject {
-	id := fmt.Sprintf("Goblin %d", countGoblin)
-	goblin := &Goblin{
-		Enemy: CreateEnemy(id, pos, CreateHealth(200), EnemyGoblin),
-	}
-	goblin.ExperienceVal = GoblinDefaultExperience
-	goblin.EquippedAttack = AttackBasic
-	goblin.SetSpeed(EnemyDefaultMovementSpeed, EnemyDefaultAttackSpeed)
-	return goblin
-}
-func (goblin *Goblin) IsBlocking() bool {
-	return true
-}
-func (archer *Archer) IsBlocking() bool {
-	return true
-}
-func (goblin *Goblin) TakeDamage(damage Damage, game *Game) {
-	goblin.CurrentHealth -= damage.Value
-	goblin.LastDamageRecieved = damage
+func (enemy *Enemy) TakeDamage(damage Damage, game *Game) {
+	enemy.CurrentHealth -= damage.Value
+	enemy.LastDamageRecieved = damage
 	if player, ok := game.GetPlayerByID(damage.EntityID); ok {
 		player.DamageDealt += damage.Value
 	}
-	goblin.CheckDeath(game)
-}
-func (archer *Archer) TakeDamage(damage Damage, game *Game) {
-	archer.CurrentHealth -= damage.Value
-	archer.LastDamageRecieved = damage
-	if player, ok := game.GetPlayerByID(damage.EntityID); ok {
-		player.DamageDealt += damage.Value
+	if enemy.VoiceLine != "" {
+		game.CreateLog("%s %s say: %s", LogInfo, enemy.GetID(), enemy.VoiceLine)
 	}
-	game.CreateLog("%s %s say: STOP HITTING ME!!!!", LogInfo, archer.GetID())
-	archer.CheckDeath(game)
+	enemy.CheckDeath(game)
 }
 func (enemy *Enemy) DistributeXp(game *Game) {
 	game.DistributeXp(enemy.ExperienceVal)
 }
-func (goblin *Goblin) DistributeXp(game *Game) {
-	game.DistributeXp(goblin.ExperienceVal)
-}
-func (archer *Archer) DistributeXp(game *Game) {
-	game.DistributeXp(archer.ExperienceVal)
-}
 func (enemy *Enemy) GetDamageMultiplierPercent() int {
-	return EnemyDefaultDamageMultipier
+	return int(enemy.DamageMultiplier)
 }
-func (goblin *Goblin) GetDamageMultiplierPercent() int {
-	return EnemyDefaultDamageMultipier - 70
-}
-func (archer *Archer) GetDamageMultiplierPercent() int {
-	return EnemyDefaultDamageMultipier - 30
-}
-func (archer *Archer) GetProjectileSpeed() int {
-	//log.Println("[DEBUG] Archer Projectile")
-	return ProjectileDefaultTravelSpeed * 15
+func (enemy *Enemy) GetProjectileSpeed() int {
+	return enemy.ProjectileSpeed
 }
 func (enemy *Enemy) SetSpeed(moveSpeed int, attackSpeed int) {
 	enemy.Speed = Speed{
@@ -191,20 +166,8 @@ func (enemy *Enemy) SetSpeed(moveSpeed int, attackSpeed int) {
 		MaxAttackSpeed:       attackSpeed,
 		CurrentAttackSpeed:   attackSpeed}
 }
-func (archer *Archer) Move(game *Game) bool {
-	return MoveEnemyGeneric(game, archer)
-}
-func (goblin *Goblin) Move(game *Game) bool {
-	return MoveEnemyGeneric(game, goblin)
-}
 func (enemy *Enemy) GetDirection() Direction {
 	return enemy.Direction
-}
-func (enemy *Enemy) GetAggroRange() int {
-	return enemy.AggroRange
-}
-func (enemy *Enemy) Move(game *Game) bool {
-	return MoveEnemyGeneric(game, enemy)
 }
 func CalculateDirection(object1 GameObject, object2 GameObject) Direction {
 	X1 := object1.GetPosition().X
@@ -225,7 +188,7 @@ func maxOne(x int) int {
 	}
 	return 1
 }
-func MoveEnemyGeneric(game *Game, enemy GenericEnemy) bool {
+func MoveEnemyGeneric(game *Game, enemy *Enemy) bool {
 	currentPos := enemy.GetPosition()
 	dir := enemy.GetDirection()
 	nextPosition := Position{
@@ -264,14 +227,10 @@ func (enemy *Enemy) GetAttackAvailable() bool {
 func (enemy *Enemy) IsEnemy() bool {
 	return true
 }
-func (enemy *Enemy) GetProjectileSpeed() int {
-	//log.Println("[DEBUG] Enemy Projectile")
-	return ProjectileDefaultTravelSpeed
-}
-func UpdateEnemy(game *Game, enemy GenericEnemy) {
+func UpdateEnemy(game *Game, enemy *Enemy) {
 	enemy.CheckDeath(game)
 
-	player, playerExist := GetPlayerInRange(enemy.GetAggroRange(), enemy, game)
+	player, playerExist := GetPlayerInRange(enemy.AggroRange, enemy, game)
 	if !playerExist {
 		return
 	}
@@ -298,7 +257,7 @@ func UpdateEnemy(game *Game, enemy GenericEnemy) {
 	}
 	enemy.ResetMovementSpeed()
 }
-func GetPlayerInRange(scanRange int, enemy GenericEnemy, game *Game) (*Player, bool) {
+func GetPlayerInRange(scanRange int, enemy *Enemy, game *Game) (*Player, bool) {
 	enemyPos := enemy.GetPosition()
 
 	var closestPlayer *Player

@@ -43,7 +43,7 @@ func (server *Server) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 	targetGameID := uuid.NewV7()
 	targetGame := game.NewGame(targetGameID, server.globalChat, server.achievementCat)
 
-	if err := targetGame.Validate(); err != nil {
+	if err := targetGame.Validate(playerID); err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -102,7 +102,7 @@ func (server *Server) HandleJoinGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := targetGame.Validate(); err != nil {
+	if err := targetGame.Validate(playerID); err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -486,6 +486,7 @@ func (server *Server) HandleGetSelfConfig(w http.ResponseWriter, r *http.Request
 func (server *Server) HandleUpdateSelfConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		http.Error(w, "Not allowed", http.StatusMethodNotAllowed)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -516,7 +517,12 @@ func (server *Server) HandleUpdateSelfConfig(w http.ResponseWriter, r *http.Requ
 		}
 
 		if existingAction, exists := seenKeys[key]; exists {
-			http.Error(w, fmt.Sprintf("Key '%s' cannot be assigned to '%s' (already bound to '%s')", key, action, existingAction), http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("Key '%s' cannot be assigned to '%s' (already bound to '%s')",
+				key,
+				db.GetActionLabel(action),
+				db.GetActionLabel(existingAction)),
+				http.StatusBadRequest,
+			)
 			return
 		}
 

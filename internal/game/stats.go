@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"time"
@@ -20,13 +21,14 @@ type Speed struct {
 type Experience struct {
 	Level         int
 	ExperienceVal int
+	NextLevelXP   int
 }
 type PlayerSessionSummary struct {
+	SessionStart    time.Time     `json:"session_start"`
+	SessionDuration time.Duration `json:"session_duration"`
 	GameID          string        `json:"game_id"`
 	PlayerID        string        `json:"player_id"`
 	KilledBy        string        `json:"killed_by"`
-	SessionStart    time.Time     `json:"session_start"`
-	SessionDuration time.Duration `json:"session_duration"`
 	LevelsCompleted int           `json:"levels_completed"`
 	EnemiesKilled   int           `json:"enemies_killed"`
 	XPGained        int           `json:"xp_gained"`
@@ -35,6 +37,17 @@ type PlayerSessionSummary struct {
 	PlayerLevel     int           `json:"player_level"`
 	Deaths          int           `json:"player_deaths"`
 	Score           int           `json:"score"`
+}
+
+var XpRequirements []int
+
+func InitXpTable() {
+	XpRequirements = make([]int, MaxPlayerLevel+1)
+	for lvl := 1; lvl <= MaxPlayerLevel; lvl++ {
+		XpRequirements[lvl] = int(math.Round(
+			PlayerLevelOneExperience * math.Pow(PlayerLevelXpRequirementMultiplier, float64(lvl-1)),
+		))
+	}
 }
 
 func (h *Health) TakeDamage(amount int) {

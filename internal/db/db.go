@@ -25,15 +25,15 @@ type Database struct {
 }
 
 type DBConfig struct {
-	Host           string
-	Port           string
-	User           string
-	Password       string
-	DBName         string
-	SSLMode        string
-	MaxOpenConn    int32
-	MinIdleConn    int32
-	MaxConnLifeMin time.Duration
+	MaxConnLifeMin time.Duration `json:"max_conn_life_min"`
+	Host           string        `json:"host"`
+	Port           string        `json:"port"`
+	User           string        `json:"user"`
+	Password       string        `json:"password"`
+	DBName         string        `json:"db_name"`
+	SSLMode        string        `json:"ssl_mode"`
+	MaxOpenConn    int32         `json:"max_open_conn"`
+	MinIdleConn    int32         `json:"min_idle_conn"`
 }
 
 func NewDatabase() (*Database, error) {

@@ -29,6 +29,22 @@ var DefaultUserConfiguration = UserConfiguration{
 	MasterVol: 100,
 	SfxVol:    70,
 }
+var ActionLabels = map[string]string{
+	"move_up":      "Move Up",
+	"move_down":    "Move Down",
+	"move_left":    "Move Left",
+	"move_right":   "Move Right",
+	"attack_enemy": "Attack Enemy",
+	"swap_attack":  "Swap Attack",
+	"quit_game":    "Quit Game",
+}
+
+func GetActionLabel(action string) string {
+	if label, ok := ActionLabels[action]; ok {
+		return label
+	}
+	return action // Fallback if an unknown key slips through
+}
 
 func (db *Database) FetchUserConfiguration(ctx context.Context, userID uuid.UUID) (UserConfiguration, error) {
 	var rawBytes []byte

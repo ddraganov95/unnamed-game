@@ -9,31 +9,31 @@ type Direction struct {
 	X, Y int
 }
 type Attack struct {
+	Execute func(game *Game, attacker Attacker)
+	Damage  Damage
 	Direction
-	Damage        *Damage
 	Name          string
 	RequiredLevel int
 	Range         int
-	Execute       func(game *Game, attacker Attacker)
 }
 type Damage struct {
-	EntityID string
-	Type     int
-	Value    int
+	Type  int
+	Value int
 }
+
+const (
+	ProjectileArrow = iota
+	ProjectileSpell
+)
+
 type Projectile struct {
 	Entity
 	Direction
 	Speed
-	Attack   *Attack
+	Attack   Attack
+	Attacker Attacker
 	SenderID string
-	IsEnemy  bool
-}
-type Arrow struct {
-	Projectile
-}
-type Spell struct {
-	Projectile
+	Kind     int
 }
 
 const (
@@ -54,123 +54,125 @@ func InitAttacks() {
 		AttackBasic: {
 			Name:          "Basic",
 			Range:         BasicAttackBaseRange,
-			Execute:       BasicAttack,
+			Execute:       NewMeleeExecutor(),
 			RequiredLevel: 1,
-			Damage:        &Damage{Value: BasicAttackBaseDamage, Type: BasicDamage},
+			Damage:        Damage{Value: BasicAttackBaseDamage, Type: BasicDamage},
 		},
 		AttackArrow: {
 			Name:          "Arrow",
 			Range:         ArrowAttackBaseRange,
-			Execute:       ArrowAttack,
+			Execute:       NewRangedExecutor(AttackArrow, ProjectileArrow),
 			RequiredLevel: 3,
-			Damage:        &Damage{Value: ArrowAttackBaseDamage, Type: ArrowDamage},
+			Damage:        Damage{Value: ArrowAttackBaseDamage, Type: ArrowDamage},
 		},
 		AttackSpell: {
 			Name:          "Spell",
 			Range:         SpellAttackBaseRange,
-			Execute:       SpellAttack,
+			Execute:       NewRangedExecutor(AttackArrow, ProjectileSpell),
 			RequiredLevel: 15,
-			Damage:        &Damage{Value: SpellAttackBaseDamage, Type: SpellDamage},
+			Damage:        Damage{Value: SpellAttackBaseDamage, Type: SpellDamage},
 		},
+	}
+}
+func NewMeleeExecutor() func(game *Game, attacker Attacker) {
+	return func(game *Game, attacker Attacker) {
+		attack := GlobalAttacks[AttackBasic]
+		attack.Direction = attacker.GetDirection()
+		attack.Damage = CreateDamage(attacker, attack.Damage.Type, attack.Damage.Value)
+		attackPosition := Position{
+			X: attacker.GetPosition().X + attacker.GetDirection().X,
+			Y: attacker.GetPosition().Y + attacker.GetDirection().Y,
+		}
+		if entity, exists := game.Level.GetAttackableAt(attackPosition); exists {
+			game.DealDamage(attacker, attack, entity)
+		}
+	}
+}
+func NewRangedExecutor(attackIndex int, style int) func(game *Game, attacker Attacker) {
+	return func(game *Game, attacker Attacker) {
+		attack := GlobalAttacks[attackIndex]
+		attack.Direction = attacker.GetDirection()
+		attack.Damage = CreateDamage(attacker, attack.Damage.Type, attack.Damage.Value)
+		proj := CreateProjectile(attacker, attack, style)
+		game.Level.AddEntity(proj)
 	}
 }
 func (projectile *Projectile) GetSenderID() string {
 	return projectile.SenderID
 }
-func CreateProjectile(attacker Attacker, attack Attack) Projectile {
+func CreateProjectile(attacker Attacker, attack Attack, kind int) *Projectile {
 	pos := attacker.GetPosition()
 	dir := attacker.GetDirection()
 
 	// Generate a unique projectile ID using the attacker's ID and timestamp
 	projID := fmt.Sprintf("%s_proj_%d", attacker.GetID(), time.Now().UnixNano())
 
-	return Projectile{
-		Entity:               CreateEntity(projID, pos),
+	return &Projectile{
+		Entity:               CreateEntity(projID, pos, attacker.GetTeam()),
 		Direction:            dir,
 		SenderID:             attacker.GetID(),
-		Attack:               &attack,
-		IsEnemy:              attacker.IsEnemy(),
+		Attack:               attack,
+		Attacker:             attacker,
 		CurrentMovementSpeed: 0,
 		MaxMovementSpeed:     attacker.GetProjectileSpeed(),
+		Kind:                 kind,
 	}
 }
-func (arrow *Arrow) GetSymbol() rune {
-	switch {
-	case arrow.Direction.Y == 0 && arrow.Direction.X == -1:
+func (p *Projectile) GetSymbol() rune {
+	switch p.Kind {
+	case ProjectileArrow:
+		switch {
+		case p.Direction.Y == 0 && p.Direction.X == -1:
+			return SymbolArrowLeft
+		case p.Direction.Y == 0 && p.Direction.X == 1:
+			return SymbolArrowRight
+		case p.Direction.Y == 1 && p.Direction.X == 0:
+			return SymbolArrovDown
+		case p.Direction.Y == -1 && p.Direction.X == 0:
+			return SymbolArrowUp
+		case p.Direction.Y == -1 && p.Direction.X == -1:
+			return SymbolArrowUpLeft
+		case p.Direction.Y == -1 && p.Direction.X == 1:
+			return SymbolArrowUpRight
+		case p.Direction.Y == 1 && p.Direction.X == -1:
+			return SymbolArrowDownLeft
+		case p.Direction.Y == 1 && p.Direction.X == 1:
+			return SymbolArrowDownRight
+		}
 		return SymbolArrowLeft
-	case arrow.Direction.Y == 0 && arrow.Direction.X == 1:
-		return SymbolArrowRight
-	case arrow.Direction.Y == 1 && arrow.Direction.X == 0:
-		return SymbolArrovDown
-	case arrow.Direction.Y == -1 && arrow.Direction.X == 0:
-		return SymbolArrowUp
-	case arrow.Direction.Y == -1 && arrow.Direction.X == -1:
-		return SymbolArrowUpLeft
-	case arrow.Direction.Y == -1 && arrow.Direction.X == 1:
-		return SymbolArrowUpRight
-	case arrow.Direction.Y == 1 && arrow.Direction.X == -1:
-		return SymbolArrowDownLeft
-	case arrow.Direction.Y == 1 && arrow.Direction.X == 1:
-		return SymbolArrowDownRight
-	}
-	return SymbolArrowLeft
-}
-func (spell *Spell) GetSymbol() rune {
-	switch {
-	case spell.Direction.Y == 0 && spell.Direction.X == -1:
-		return SymbolSpellLeft
-	case spell.Direction.Y == 0 && spell.Direction.X == 1:
-		return SymbolSpellRight
-	case spell.Direction.Y == 1 && spell.Direction.X == 0:
-		return SymbolSpellDown
-	case spell.Direction.Y == -1 && spell.Direction.X == 0:
+
+	case ProjectileSpell:
+		switch {
+		case p.Direction.Y == 0 && p.Direction.X == -1:
+			return SymbolSpellLeft
+		case p.Direction.Y == 0 && p.Direction.X == 1:
+			return SymbolSpellRight
+		case p.Direction.Y == 1 && p.Direction.X == 0:
+			return SymbolSpellDown
+		case p.Direction.Y == -1 && p.Direction.X == 0:
+			return SymbolSpellUp
+		case p.Direction.Y == -1 && p.Direction.X == -1:
+			return SymbolSpellUpLeft
+		case p.Direction.Y == -1 && p.Direction.X == 1:
+			return SymbolSpellUpRight
+		case p.Direction.Y == 1 && p.Direction.X == -1:
+			return SymbolSpellDownLeft
+		case p.Direction.Y == 1 && p.Direction.X == 1:
+			return SymbolSpellDownRight
+		}
 		return SymbolSpellUp
-	case spell.Direction.Y == -1 && spell.Direction.X == -1:
-		return SymbolSpellUpLeft
-	case spell.Direction.Y == -1 && spell.Direction.X == 1:
-		return SymbolSpellUpRight
-	case spell.Direction.Y == 1 && spell.Direction.X == -1:
-		return SymbolSpellDownLeft
-	case spell.Direction.Y == 1 && spell.Direction.X == 1:
-		return SymbolSpellDownRight
 	}
-	return SymbolSpellUp
+	return ' '
 }
-func (projectile *Projectile) GetEntityID() string {
-	if projectile.Attack.Damage != nil {
-		return projectile.Attack.Damage.EntityID
-	}
-	return projectile.SenderID
-}
+
 func (projectile *Projectile) ResetMovementSpeed() {
 	projectile.CurrentMovementSpeed = projectile.MaxMovementSpeed
 }
-func (attack *Attack) GetDamage() *Damage {
-	return attack.Damage
-}
-func CreateDamage(attacker Attacker, ttype int, value int) *Damage {
-	return &Damage{
+func CreateDamage(attacker Attacker, ttype int, value int) Damage {
+	return Damage{
 		Type:     ttype,
 		Value:    (value * (100 + attacker.GetDamageMultiplierPercent())) / 100,
 		EntityID: attacker.GetID(),
-	}
-}
-func CreateAttack(direction Direction, damage *Damage, name string) *Attack {
-	return &Attack{
-		Direction: direction,
-		Damage:    damage,
-		Name:      name,
-	}
-}
-func CreateArrow(attacker Attacker, attack *Attack) GameObject {
-	return &Arrow{
-		Projectile: CreateProjectile(attacker, *attack),
-	}
-}
-
-func CreateSpell(attacker Attacker, attack *Attack) GameObject {
-	return &Spell{
-		Projectile: CreateProjectile(attacker, *attack),
 	}
 }
 func (projectile *Projectile) Update(game *Game) {
@@ -195,19 +197,17 @@ func (projectile *Projectile) Update(game *Game) {
 		projectile.Attack.Range--
 	}
 	// Check bounds
-	if newPos.X < 0 || newPos.X >= game.Level.sizeX ||
-		newPos.Y < 0 || newPos.Y >= game.Level.sizeY {
+	if newPos.X < 0 || newPos.X >= LevelSizeX ||
+		newPos.Y < 0 || newPos.Y >= LevelSizeY {
 		game.Level.RemoveEntity(projectile)
 		return
 	}
 
 	// Check attackable entities
 	if attackable, exists := game.Level.GetAttackableAt(newPos); exists {
-		//log.Println("projectile found attackable")
-		if projectile.IsEnemy != attackable.IsEnemy() {
-			//log.Printf("%s got hit by projectile %s sent by %s", attackable.GetID(), projectile.GetID(), projectile.SenderID)
-			game.DealDamage(*projectile.Attack, attackable)
+		if ok := game.DealDamage(projectile.Attacker, projectile.Attack, attackable); ok {
 			game.Level.RemoveEntity(projectile)
+			return
 		}
 		game.Level.MoveEntity(projectile, newPos)
 		return
@@ -222,74 +222,20 @@ func (projectile *Projectile) Update(game *Game) {
 
 	game.Level.MoveEntity(projectile, newPos)
 }
-func (game *Game) DealDamage(attack Attack, target GameObject) {
-	damage := attack.GetDamage()
-	if damage == nil {
-		return
+func (game *Game) DealDamage(attacker Attacker, attack Attack, target Attackable) bool {
+	if attacker.GetTeam() == target.GetTeam() {
+		return false
 	}
-	if attackable, ok := target.(Attackable); ok {
-		attackable.TakeDamage(*attack.Damage, game)
-		id := CreateID("%s_effect", attack.GetDamage().EntityID)
-		game.Level.AddEffect(CreateHitEffect(id, target.GetPosition(), 3))
-	}
+	target.TakeDamage(attack.Damage, game)
+	id := fmt.Sprintf("%s_effect", attacker.GetID())
+	game.Level.AddEffect(CreateHitEffect(id, target.GetPosition(), 3))
+	return true
+
 }
 func (attack Attack) String() string {
 	return attack.Name
 }
-func ArrowAttack(game *Game, attacker Attacker) {
-	blueprint := GlobalAttacks[AttackArrow]
-
-	attack := Attack{
-		Name:      blueprint.Name,
-		Range:     blueprint.Range,
-		Direction: attacker.GetDirection(),
-		Damage: CreateDamage(
-			attacker,
-			blueprint.Damage.Type,
-			blueprint.Damage.Value,
-		),
-	}
-	game.Level.AddEntity(CreateArrow(attacker, &attack))
-}
-
-func SpellAttack(game *Game, attacker Attacker) {
-	blueprint := GlobalAttacks[AttackSpell]
-
-	attack := Attack{
-		Name:      blueprint.Name,
-		Range:     blueprint.Range,
-		Direction: attacker.GetDirection(),
-		Damage: CreateDamage(
-			attacker,
-			blueprint.Damage.Type,
-			blueprint.Damage.Value,
-		),
-	}
-	game.Level.AddEntity(CreateSpell(attacker, &attack))
-}
-func BasicAttack(game *Game, attacker Attacker) {
-	blueprint := GlobalAttacks[AttackBasic]
-
-	attack := Attack{
-		Name:      blueprint.Name,
-		Range:     blueprint.Range,
-		Direction: attacker.GetDirection(),
-		Damage: CreateDamage(
-			attacker,
-			blueprint.Damage.Type,
-			blueprint.Damage.Value,
-		),
-	}
-
-	attackPosition := Position{
-		X: attacker.GetPosition().X + attacker.GetDirection().X,
-		Y: attacker.GetPosition().Y + attacker.GetDirection().Y,
-	}
-	if entity, exists := game.Level.GetAttackableAt(attackPosition); exists {
-		game.DealDamage(attack, entity)
-	}
-}
-func (game *Game) Attack(attacker GenericEnemy) bool {
+func (game *Game) Attack(attacker *Enemy) bool {
 	if !attacker.GetAttackAvailable() {
 		return false
 	}

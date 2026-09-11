@@ -12,45 +12,45 @@ import (
 // --- DTOs (Data Transfer Objects from DB) ---
 
 type AchCatalogRequirement struct {
-	GroupID     int    `json:"group_id"`
-	ReqType     string `json:"req_type"`
 	TargetValue int64  `json:"target_value"`
+	ReqType     string `json:"req_type"`
+	GroupID     int    `json:"group_id"`
 }
 
 type AchCatalogDTO struct {
+	Requirements         []AchCatalogRequirement `json:"requirements"`
 	ID                   uuid.UUID               `json:"id"`
 	Code                 string                  `json:"code"`
 	Title                string                  `json:"title"`
 	Description          string                  `json:"description"`
 	IsGlobalAnnouncement bool                    `json:"is_global_announcement"`
-	Requirements         []AchCatalogRequirement `json:"requirements"`
 }
 
 type AchProgressDTO struct {
 	AchievementID uuid.UUID        `json:"achievement_id"`
 	Code          string           `json:"code"`
-	IsUnlocked    bool             `json:"is_unlocked"`
 	MaxProgress   map[string]int64 `json:"max_progress"`
 	Progress      map[string]int64 `json:"progress"`
+	IsUnlocked    bool             `json:"is_unlocked"`
 }
 
 type AchievementView struct {
 	AchievementID uuid.UUID        `json:"achievement_id"`
 	Code          string           `json:"code"`
+	Progress      map[string]int64 `json:"progress"`
+	MaxProgress   map[string]int64 `json:"max_progress"`
 	Title         string           `json:"title"`
 	Description   string           `json:"description"`
 	IsUnlocked    bool             `json:"is_unlocked"`
-	Progress      map[string]int64 `json:"progress"`
-	MaxProgress   map[string]int64 `json:"max_progress"`
 }
 
 // --- Global Catalog Structs ---
 
 type AchReqTarget struct {
 	AchievementID uuid.UUID
+	TargetValue   int64
 	GroupID       int
 	BitIndex      uint8
-	TargetValue   int64
 }
 
 type AchReqGroupDef struct {
@@ -63,9 +63,9 @@ type AchievementDef struct {
 	Code                 string
 	Title                string
 	Description          string
-	IsGlobalAnnouncement bool
 	Groups               map[int]AchReqGroupDef
 	MaxProgress          map[string]int64
+	IsGlobalAnnouncement bool
 }
 
 type AchievementCatalog struct {
@@ -148,7 +148,6 @@ type AchievementEvent struct {
 
 type AchievementEngine struct {
 	sync.RWMutex
-
 	invertedIndex   map[string][]AchReqTarget
 	catalog         map[uuid.UUID]*AchievementDef
 	activeListeners map[string]*int64
@@ -234,6 +233,7 @@ func (e *AchievementEngine) LoadPlayerAchievements(playerID string, states []Ach
 }
 
 func (e *AchievementEngine) PublishEvent(event AchievementEvent) {
+	event.Key = strings.ToLower(event.Key)
 	e.RLock()
 	listenerPtr := e.activeListeners[event.Key]
 	var listenerCount int64
@@ -302,7 +302,7 @@ func (e *AchievementEngine) checkAndApplyProgress(playerID string, p *PlayerProg
 	reqKey := fmt.Sprintf("%s:%d:%d", target.AchievementID, target.GroupID, target.BitIndex)
 
 	switch {
-	case strings.HasPrefix(eventKey, "TIME:"):
+	case strings.HasPrefix(eventKey, "time:"):
 		p.ReqValues[reqKey] = amount
 		timeMet := amount <= target.TargetValue
 
@@ -333,7 +333,7 @@ func (e *AchievementEngine) checkAndApplyProgress(playerID string, p *PlayerProg
 			log.Printf("[ACHIEVEMENT DEBUG] TIME failed for group %d on achievement %s. Group reset.", target.GroupID, def.Code)
 		}
 
-	case strings.HasPrefix(eventKey, "GAME:"):
+	case strings.HasPrefix(eventKey, "game:"):
 		groupDef := def.Groups[target.GroupID]
 		if p.GroupMasks[def.ID] == nil {
 			p.GroupMasks[def.ID] = make(map[int]uint64)

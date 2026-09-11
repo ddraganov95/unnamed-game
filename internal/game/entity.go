@@ -1,10 +1,18 @@
 package game
 
-import "fmt"
+type Team uint8
+
+const (
+	TeamEnvironment Team = iota
+	TeamPlayer
+	TeamEnemy
+)
 
 type Entity struct {
 	ID       string
 	Position Position
+	Team     Team
+	Blocker  bool
 }
 type Position struct {
 	X, Y int
@@ -19,10 +27,18 @@ func (entity *Entity) GetPosition() Position {
 func (entity *Entity) SetPosition(pos Position) {
 	entity.Position = pos
 }
-func CreateEntity(id string, pos Position) Entity {
+func (entity *Entity) GetTeam() Team {
+	return entity.Team
+}
+func (entity *Entity) IsBlocking() bool {
+	return entity.Blocker
+}
+func CreateEntity(id string, pos Position, team Team) Entity {
 	return Entity{
 		ID:       id,
 		Position: pos,
+		Blocker:  false,
+		Team:     team,
 	}
 }
 func (level *Level) AddEntity(object GameObject) {
@@ -44,7 +60,7 @@ func (level *Level) RemoveEntity(object GameObject) {
 		delete(level.posEntities, object.GetPosition())
 	}
 }
-func (level *Level) MoveEntity(object Positionable, newPos Position) {
+func (level *Level) MoveEntity(object GameObject, newPos Position) {
 	//Remove from old position slice
 	oldSlice := level.posEntities[object.GetPosition()]
 	for i, e := range oldSlice {
@@ -60,7 +76,4 @@ func (level *Level) MoveEntity(object Positionable, newPos Position) {
 	//Update position and add to new position slice
 	object.SetPosition(newPos)
 	level.posEntities[newPos] = append(level.posEntities[newPos], object)
-}
-func CreateID(format string, args ...any) string {
-	return fmt.Sprintf(format, args...)
 }

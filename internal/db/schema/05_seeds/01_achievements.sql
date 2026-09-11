@@ -7,7 +7,7 @@ VALUES (
     '[
         {
             "group_id": 1,
-            "req_type": "KILL:goblin",
+            "req_type": "kill:goblin",
             "target_value": 10
         }
     ]'::jsonb,
@@ -24,12 +24,12 @@ VALUES (
     '[
         {
             "group_id": 1,
-            "req_type": "KILL:goblin",
+            "req_type": "kill:goblin",
             "target_value": 10
         },
         {
             "group_id": 2,
-            "req_type": "KILL:archer",
+            "req_type": "kill:archer",
             "target_value": 1
         }
     ]'::jsonb
@@ -45,12 +45,12 @@ VALUES (
     '[
         {
             "group_id": 1,
-            "req_type": "KILL:goblin",
+            "req_type": "kill:goblin",
             "target_value": 250
         },
         {
             "group_id": 2,
-            "req_type": "KILL:archer",
+            "req_type": "kill:archer",
             "target_value": 50
         }
     ]'::jsonb
@@ -66,12 +66,12 @@ VALUES (
     '[
         {
             "group_id": 1,
-            "req_type": "TIME:level_speedrun",
+            "req_type": "time:level_speedrun",
             "target_value": 60
         },
         {
             "group_id": 1,
-            "req_type": "KILL:goblin",
+            "req_type": "kill:goblin",
             "target_value": 3
         }
     ]'::jsonb
@@ -86,12 +86,12 @@ VALUES (
     '[
         {
             "group_id": 1,
-            "req_type": "GAME:default",
+            "req_type": "game:default",
             "target_value": 0
         },
         {
             "group_id": 1,
-            "req_type": "KILL:goblin",
+            "req_type": "kill:goblin",
             "target_value": 3
         }
     ]'::jsonb

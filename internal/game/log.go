@@ -3,8 +3,8 @@ package game
 import "fmt"
 
 type Event struct {
+	Runes []rune
 	Text  string
-	Runes []rune // Cached version for display.
 }
 
 func (game *Game) CreateLog(format string, args ...any) {

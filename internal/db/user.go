@@ -19,10 +19,10 @@ type UserRef struct {
 }
 
 type User struct {
-	UserID                 uuid.UUID `db:"user_id" json:"user_id"`
-	PlayerID               string    `db:"player_id" json:"player_id"`
 	LastLogin              time.Time `db:"last_login" json:"last_login"`
 	CreatedAt              time.Time `db:"created_at" json:"created_at"`
+	UserID                 uuid.UUID `db:"user_id" json:"user_id"`
+	PlayerID               string    `db:"player_id" json:"player_id"`
 	TotalXPGained          int64     `db:"total_xp_gained" json:"total_xp_gained"`
 	TotalDamageDealt       int64     `db:"total_damage_dealt" json:"total_damage_dealt"`
 	TotalDamageTaken       int64     `db:"total_damage_taken" json:"total_damage_taken"`

@@ -21,8 +21,7 @@ const (
 	SymbolArcher         = '★'
 	SymbolPlayer         = '⊗'
 	SymbolGoblin         = '¶'
-	SymbolTopWall        = '#'
-	SymbolSideWall       = '#'
+	SymbolWallDefault    = '#'
 	SymbolArrowLeft      = '<'
 	SymbolArrowRight     = '>'
 	SymbolArrowUp        = '^'
@@ -109,4 +108,5 @@ const (
 	InputBufferPerPlayer     = 10
 	StopGameAfterIdleMinutes = 3
 	PlayerAllowedAFKMins     = 2
+	MaxPlayerLevel           = 100
 )

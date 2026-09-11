@@ -10,7 +10,6 @@ body {
     margin: 0;
     overflow: hidden;
 }
-
 /* Standard Card (Identify / Login Page) */
 .card {
     background: #121826;
@@ -139,6 +138,7 @@ button:hover {
     font-size: 13px;
     text-align: center;
     min-height: 18px;
+    margin-top: 12px;
 }
 
 /* Chat Component */
