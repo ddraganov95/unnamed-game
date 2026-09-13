@@ -19,9 +19,6 @@ type GameObject interface {
 	Blocker
 	Teamer
 }
-type Updateable interface {
-	Update(game *Game)
-}
 type Attackable interface {
 	Identifiable
 	Positionable
@@ -45,7 +42,7 @@ type Drawable interface {
 type Effect interface {
 	Drawable
 	Identifiable
-	Updateable
+	Update(game *Game)
 }
 type Living interface {
 	IsAlive() bool

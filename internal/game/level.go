@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
 	"time"
 )
@@ -15,6 +16,8 @@ type Level struct {
 	PlayerSpawnPoints []Position
 	EnemySpawnPoints  []Position
 	Floor             [][]rune
+	Enemies           []*Enemy
+	Projectiles       []*Projectile
 }
 type Zone struct {
 	Entity
@@ -42,7 +45,7 @@ func NewLevel(game *Game) {
 	level.InitializeSpawnPoints()
 
 	game.Events = nil
-	game.Level = *level
+	game.Level = level
 	game.LevelNumber++
 
 	for _, player := range game.GetActivePlayers() {
@@ -219,7 +222,8 @@ func (level *Level) SpawnEnemies(rules []SpawnRule) {
 			if _, taken := level.GetEntityAt(pos); !taken {
 				id := fmt.Sprintf("%s %d", rule.EnemyType.String(), spawned+1)
 				enemy := CreateEnemy(id, pos, rule.EnemyType)
-				level.AddEntity(enemy)
+				log.Printf("add enemy")
+				level.AddEnemy(enemy)
 				spawned++
 			}
 		}

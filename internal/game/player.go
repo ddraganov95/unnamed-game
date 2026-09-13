@@ -13,6 +13,7 @@ type Player struct {
 	Experience
 	Direction
 	PlayerSessionSummary
+	Speed
 	KeyBindings         map[rune]func(g *Game)
 	TypingKeyBindings   map[rune]func(g *Game)
 	DisplayChan         chan string
@@ -116,6 +117,9 @@ func (player *Player) UpdatePlayer(game *Game) {
 	}
 	keyPresses := player.KeyQueue
 	if player.PlayerState == StatePlaying {
+		if player.CurrentAttackSpeed > 0 {
+			player.CurrentAttackSpeed--
+		}
 		for _, key := range keyPresses {
 			if function, exists := player.KeyBindings[unicode.ToLower(key)]; exists {
 				function(game)
@@ -146,15 +150,22 @@ func NewPlayer(id string, keybinds map[string]string) *Player {
 		ID:            id,
 		CurrentHealth: 100, MaxHealth: 100,
 		X: 0, Y: 0,
-		Blocker:             true,
-		EquippedAttack:      AttackBasic,
-		PlayerState:         StatePlaying,
-		PlayerTypingChannel: StateTypingGameChat,
-		DisplayChan:         make(chan string, 100),
-		PlayerID:            id,
-		SessionStart:        time.Now(),
+		Blocker:              true,
+		EquippedAttack:       AttackBasic,
+		PlayerState:          StatePlaying,
+		PlayerTypingChannel:  StateTypingGameChat,
+		DisplayChan:          make(chan string, 100),
+		PlayerID:             id,
+		SessionStart:         time.Now(),
+		Level:                1,
+		ExperienceVal:        0,
+		NextLevelXP:          XpRequirements[1],
+		MaxMovementSpeed:     3,
+		MaxAttackSpeed:       12,
+		CurrentMovementSpeed: 0,
+		CurrentAttackSpeed:   0,
 	}
-	player.Experience = Experience{Level: 1, ExperienceVal: 0, NextLevelXP: XpRequirements[1]}
+
 	player.UnlockAttacks()
 	player.InitKeybindings(keybinds)
 	player.InitTypingKeybindings()
@@ -165,7 +176,11 @@ func (player *Player) Attack(game *Game) {
 	if !player.IsAlive() {
 		return
 	}
+	if player.CurrentAttackSpeed > 0 {
+		return
+	}
 	player.UnlockedAttacks[player.EquippedAttack].Execute(game, player)
+	player.CurrentAttackSpeed = player.MaxAttackSpeed
 }
 func (player *Player) GetEquippedAttack() Attack {
 	return player.UnlockedAttacks[player.EquippedAttack]
@@ -200,13 +215,13 @@ func (player *Player) CheckDeath(game *Game) {
 	}
 }
 func (player *Player) GetDamageMultiplierPercent() int {
-	return PlayerDefaultDamageMultipier * 2 * player.Level
+	return PlayerDefaultDamageMultipier * 2
 }
 func (player *Player) IsEnemy() bool {
 	return false
 }
 func (player *Player) GetProjectileSpeed() int {
-	return 2
+	return 3
 }
 func (player *Player) GainXp(xp int) {
 	if !player.IsAlive() {

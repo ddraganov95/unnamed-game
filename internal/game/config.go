@@ -31,10 +31,7 @@ const (
 	SymbolArrowDownLeft  = '/'
 	SymbolArrowDownRight = '\\'
 
-	//SymbolArrowLeft        = '★'
-	//SymbolArrowRight       = '★'
-	//SymbolArrowUp          = '★'
-	//SymbolArrovDown        = '★'
+	SymbolOrb               = 'O'
 	SymbolDefault           = ' '
 	SymbolDefaultLevelTile  = ' '
 	SymbolSpellLeft         = '❄'
@@ -72,9 +69,12 @@ const (
 	BasicAttackBaseDamage              = 30
 	ArrowAttackBaseDamage              = 10
 	SpellAttackBaseDamage              = 20
+	OrbAttackBaseDamage                = 10
+	OrbAttackProjectileDamage          = 15
 	BasicAttackBaseRange               = 1
 	ArrowAttackBaseRange               = 30
 	SpellAttackBaseRange               = 25
+	OrbAttackBaseRange                 = 15
 )
 
 // Level Constants

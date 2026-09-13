@@ -1,5 +1,7 @@
 package game
 
+import "log"
+
 type Team uint8
 
 const (
@@ -60,6 +62,53 @@ func (level *Level) RemoveEntity(object GameObject) {
 		delete(level.posEntities, object.GetPosition())
 	}
 }
+func (level *Level) AddProjectile(projectile *Projectile) {
+	level.AddEntity(projectile)
+	level.Projectiles = append(level.Projectiles, projectile)
+}
+
+func (level *Level) AddEnemy(enemy *Enemy) {
+	level.AddEntity(enemy)
+	level.Enemies = append(level.Enemies, enemy)
+}
+
+func (level *Level) RemoveProjectile(projectile *Projectile) {
+	if projectile == nil {
+		log.Printf("[REMOVE FAILED] Attempted to remove nil projectile")
+		return
+	}
+	if projectile.OnRemove != nil {
+		log.Printf("[REMOVE] Trying to shoot arrows")
+		projectile.OnRemove()
+	}
+
+	level.RemoveEntity(projectile)
+	level.Projectiles = removeProjectileSlice(level.Projectiles, projectile)
+
+}
+func removeProjectileSlice(slice []*Projectile, target *Projectile) []*Projectile {
+	for i, p := range slice {
+		if p == target {
+			log.Printf(" -> MATCH FOUND at index %d! Removing...", i)
+			return append(slice[:i], slice[i+1:]...)
+		}
+	}
+	return slice
+}
+func (level *Level) RemoveEnemy(enemy *Enemy) {
+	level.RemoveEntity(enemy)
+	level.Enemies = removeEnemySlice(level.Enemies, enemy.GetID())
+}
+func removeEnemySlice(slice []*Enemy, id string) []*Enemy {
+	for i, e := range slice {
+		log.Printf("comparing %s with %s", e.GetID(), id)
+		if e.GetID() == id {
+			return append(slice[:i], slice[i+1:]...)
+		}
+	}
+	return slice
+}
+
 func (level *Level) MoveEntity(object GameObject, newPos Position) {
 	//Remove from old position slice
 	oldSlice := level.posEntities[object.GetPosition()]

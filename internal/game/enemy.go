@@ -188,24 +188,6 @@ func maxOne(x int) int {
 	}
 	return 1
 }
-func MoveEnemyGeneric(game *Game, enemy *Enemy) bool {
-	currentPos := enemy.GetPosition()
-	dir := enemy.GetDirection()
-	nextPosition := Position{
-		X: currentPos.X + dir.X,
-		Y: currentPos.Y + dir.Y,
-	}
-
-	if !IsPositionInBounds(nextPosition) {
-		return false
-	}
-	if _, ok := game.Level.GetBlockerAt(nextPosition); ok {
-		return false
-	}
-
-	game.Level.MoveEntity(enemy, nextPosition)
-	return true
-}
 func (enemy *Enemy) LowerMovementSpeed(speed int) {
 	enemy.CurrentMovementSpeed = enemy.CurrentMovementSpeed - speed
 }
@@ -255,7 +237,41 @@ func UpdateEnemy(game *Game, enemy *Enemy) {
 		enemy.SetDirection(GetNextStepDirection(enemy.GetPosition(), player.GetPosition(), game))
 		enemy.Move(game)
 	}
+	//We moved check into what
+	CheckTileImpact(game, enemy)
+
 	enemy.ResetMovementSpeed()
+}
+func MoveEnemyGeneric(game *Game, enemy *Enemy) bool {
+	currentPos := enemy.GetPosition()
+	dir := enemy.GetDirection()
+	nextPosition := Position{
+		X: currentPos.X + dir.X,
+		Y: currentPos.Y + dir.Y,
+	}
+
+	if !IsPositionInBounds(nextPosition) {
+		return false
+	}
+	if _, ok := game.Level.GetBlockerAt(nextPosition); ok {
+		return false
+	}
+
+	game.Level.MoveEntity(enemy, nextPosition)
+	return true
+}
+func CheckTileImpact(game *Game, enemy *Enemy) {
+	pos := enemy.GetPosition()
+	for _, entity := range game.Level.posEntities[pos] {
+		proj, ok := entity.(*Projectile)
+		if !ok {
+			continue
+		}
+		if game.DealDamage(proj.Attacker, proj.Attack, enemy) {
+			game.Level.RemoveProjectile(proj)
+			return
+		}
+	}
 }
 func GetPlayerInRange(scanRange int, enemy *Enemy, game *Game) (*Player, bool) {
 	enemyPos := enemy.GetPosition()
@@ -384,12 +400,12 @@ func (enemy *Enemy) CheckDeath(game *Game) {
 		}
 		game.AchievementEngine.PublishEvent(AchievementEvent{
 			PlayerIDs: game.GetActiveAndAlivePlayerID(),
-			Key:       fmt.Sprintf("KILL:%s", enemy.EnemyType), // Produces "KILL:goblin", "KILL:archer", etc.
+			Key:       fmt.Sprintf("kill:%s", enemy.EnemyType), // Produces "KILL:goblin", "KILL:archer", etc.
 			Amount:    1,
 		})
-		game.CreateLog("%s %s killed %s", LogSuccess, killer, enemy.GetID())
-		enemy.DistributeXp(game)
 
-		game.Level.RemoveEntity(enemy)
+		enemy.DistributeXp(game)
+		game.CreateLog("Trying to remove enemy %s", enemy.GetID())
+		game.Level.RemoveEnemy(enemy)
 	}
 }

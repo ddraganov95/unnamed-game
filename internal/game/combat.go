@@ -2,7 +2,7 @@ package game
 
 import (
 	"fmt"
-	"time"
+	"sync/atomic"
 )
 
 type Direction struct {
@@ -17,16 +17,20 @@ type Attack struct {
 	Range         int
 }
 type Damage struct {
-	Type  int
-	Value int
+	EntityID string
+	Type     int
+	Value    int
 }
 
 const (
 	ProjectileArrow = iota
 	ProjectileSpell
+	ProjectileOrb
 )
 
 type Projectile struct {
+	OnUpdate func()
+	OnRemove func()
 	Entity
 	Direction
 	Speed
@@ -40,6 +44,7 @@ const (
 	AttackBasic = iota
 	AttackArrow
 	AttackSpell
+	AttackOrb
 )
 const (
 	BasicDamage = iota
@@ -72,6 +77,13 @@ func InitAttacks() {
 			RequiredLevel: 15,
 			Damage:        Damage{Value: SpellAttackBaseDamage, Type: SpellDamage},
 		},
+		AttackOrb: {
+			Name:          "Orb",
+			Range:         SpellAttackBaseRange,
+			Execute:       NewOrbExecutor(AttackOrb, ProjectileOrb),
+			RequiredLevel: 35,
+			Damage:        Damage{Value: SpellAttackBaseDamage, Type: SpellDamage},
+		},
 	}
 }
 func NewMeleeExecutor() func(game *Game, attacker Attacker) {
@@ -94,22 +106,86 @@ func NewRangedExecutor(attackIndex int, style int) func(game *Game, attacker Att
 		attack.Direction = attacker.GetDirection()
 		attack.Damage = CreateDamage(attacker, attack.Damage.Type, attack.Damage.Value)
 		proj := CreateProjectile(attacker, attack, style)
-		game.Level.AddEntity(proj)
+		game.Level.AddProjectile(proj)
+	}
+}
+func NewOrbExecutor(attackIndex int, style int) func(game *Game, attacker Attacker) {
+	return func(game *Game, attacker Attacker) {
+		attack := GlobalAttacks[attackIndex]
+		attack.Direction = attacker.GetDirection()
+		forward := attacker.GetDirection()
+		backward := Direction{X: -forward.X, Y: -forward.Y} // Directly opposite direction
+		attack.Direction = forward
+		attack.Damage = CreateDamage(attacker, attack.Damage.Type, attack.Damage.Value)
+		proj := CreateProjectile(attacker, attack, style)
+		all8Directions := []Direction{
+			{X: 0, Y: -1},  // N
+			{X: 1, Y: -1},  // NE
+			{X: 1, Y: 0},   // E
+			{X: 1, Y: 1},   // SE
+			{X: 0, Y: 1},   // S
+			{X: -1, Y: 1},  // SW
+			{X: -1, Y: 0},  // W
+			{X: -1, Y: -1}, // NW
+		}
+
+		// Filter out straight-ahead and straight-behind once during setup
+		validDirections := make([]Direction, 0, 6)
+		for _, d := range all8Directions {
+			if d == forward || d == backward {
+				continue
+			}
+			validDirections = append(validDirections, d)
+		}
+
+		dirIndex := 0
+		ticks := 0
+		proj.OnUpdate = func() {
+			ticks++
+			if ticks%10 != 0 { // Fire only on every so frames
+				return
+			}
+			projAttack := GlobalAttacks[AttackArrow]
+			shootDir := validDirections[dirIndex]
+			dirIndex = (dirIndex + 1) % len(validDirections)
+			projAttack.Direction = shootDir
+			projAttack.Damage = CreateDamage(attacker, attack.Damage.Type, attack.Damage.Value)
+			subProj := CreateProjectile(attacker, projAttack, ProjectileArrow)
+			subProj.SetPosition(proj.GetPosition())
+			game.Level.AddProjectile(subProj)
+		}
+		proj.OnRemove = func() {
+
+			for _, direction := range all8Directions {
+				projAttack := GlobalAttacks[AttackArrow]
+				projAttack.Direction = direction
+				projAttack.Damage = CreateDamage(attacker, attack.Damage.Type, attack.Damage.Value)
+				subProj := CreateProjectile(attacker, projAttack, ProjectileArrow)
+				subProj.SetPosition(proj.GetPosition())
+				game.Level.AddProjectile(subProj)
+			}
+		}
+
+		game.Level.AddProjectile(proj)
 	}
 }
 func (projectile *Projectile) GetSenderID() string {
 	return projectile.SenderID
 }
+
+var projectileCounter uint64
+
 func CreateProjectile(attacker Attacker, attack Attack, kind int) *Projectile {
 	pos := attacker.GetPosition()
-	dir := attacker.GetDirection()
+	//dir := attacker.GetDirection()
 
-	// Generate a unique projectile ID using the attacker's ID and timestamp
-	projID := fmt.Sprintf("%s_proj_%d", attacker.GetID(), time.Now().UnixNano())
+	// Generate a unique projectile ID using the attacker's ID and counter
+	idNum := atomic.AddUint64(&projectileCounter, 1)
+	projID := fmt.Sprintf("%s_proj_%d", attacker.GetID(), idNum)
 
 	return &Projectile{
 		Entity:               CreateEntity(projID, pos, attacker.GetTeam()),
-		Direction:            dir,
+		Direction:            attack.Direction,
 		SenderID:             attacker.GetID(),
 		Attack:               attack,
 		Attacker:             attacker,
@@ -161,6 +237,8 @@ func (p *Projectile) GetSymbol() rune {
 			return SymbolSpellDownRight
 		}
 		return SymbolSpellUp
+	case ProjectileOrb:
+		return SymbolOrb
 	}
 	return ' '
 }
@@ -177,6 +255,9 @@ func CreateDamage(attacker Attacker, ttype int, value int) Damage {
 }
 func (projectile *Projectile) Update(game *Game) {
 	//fmt.Printf("Projectile %s tried to move with %v speed\n", projectile.GetEntityID(), projectile.CurrentMovementSpeed)
+	if projectile.OnUpdate != nil {
+		projectile.OnUpdate()
+	}
 	if projectile.CurrentMovementSpeed > 0 {
 		projectile.CurrentMovementSpeed--
 		return
@@ -186,7 +267,7 @@ func (projectile *Projectile) Update(game *Game) {
 	projectile.Attack.Range--
 	//Check Range
 	if projectile.Attack.Range <= 0 {
-		game.Level.RemoveEntity(projectile)
+		game.Level.RemoveProjectile(projectile)
 		return
 	}
 	newPos := Position{
@@ -199,14 +280,14 @@ func (projectile *Projectile) Update(game *Game) {
 	// Check bounds
 	if newPos.X < 0 || newPos.X >= LevelSizeX ||
 		newPos.Y < 0 || newPos.Y >= LevelSizeY {
-		game.Level.RemoveEntity(projectile)
+		game.Level.RemoveProjectile(projectile)
 		return
 	}
 
 	// Check attackable entities
 	if attackable, exists := game.Level.GetAttackableAt(newPos); exists {
 		if ok := game.DealDamage(projectile.Attacker, projectile.Attack, attackable); ok {
-			game.Level.RemoveEntity(projectile)
+			game.Level.RemoveProjectile(projectile)
 			return
 		}
 		game.Level.MoveEntity(projectile, newPos)
@@ -216,7 +297,7 @@ func (projectile *Projectile) Update(game *Game) {
 	// Check blockers
 	if _, blocked := game.Level.GetBlockerAt(newPos); blocked {
 		//log.Println("projectile blocked")
-		game.Level.RemoveEntity(projectile)
+		game.Level.RemoveProjectile(projectile)
 		return
 	}
 
@@ -227,7 +308,7 @@ func (game *Game) DealDamage(attacker Attacker, attack Attack, target Attackable
 		return false
 	}
 	target.TakeDamage(attack.Damage, game)
-	id := fmt.Sprintf("%s_effect", attacker.GetID())
+	id := fmt.Sprintf("%s_effect", attack.Damage.EntityID)
 	game.Level.AddEffect(CreateHitEffect(id, target.GetPosition(), 3))
 	return true
 

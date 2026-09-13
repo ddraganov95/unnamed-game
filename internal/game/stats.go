@@ -110,7 +110,7 @@ func GetSummaryLines(summary PlayerSessionSummary, quitKey string) []string {
 		fmt.Sprintf("| Score:          %-38d |", summary.Score),
 		"+--------------------------------------------------------+",
 		"|               Press [SPACE] to continue                |",
-		fmt.Sprintf("|               Press [%1s] to exit game                  |", quitKey),
+		fmt.Sprintf("|               Press [%1s] to exit game                   |", quitKey),
 		"+--------------------------------------------------------+",
 	}
 }

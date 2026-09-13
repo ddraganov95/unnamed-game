@@ -22,7 +22,7 @@ type Game struct {
 	ServerEventChan   chan ServerEvent
 	DestroyChan       chan struct{}
 	GameId            uuid.UUID
-	Level             Level
+	Level             *Level
 	EmptyMinutes      int
 	LevelNumber       int
 	State             GameState
@@ -137,8 +137,17 @@ func (game *Game) StartGame() {
 }
 
 func (game *Game) UpdateGame() {
-	UpdateMap(game.Level.Entities, game)
-	UpdateMap(game.Level.Effects, game)
+	//log.Printf("There are %d projectiles in the level", len(game.Level.Projectiles))
+	for _, proj := range game.Level.Projectiles {
+		proj.Update(game)
+	}
+	//log.Printf("There are %d enemies in the level", len(game.Level.Enemies))
+	for _, enemy := range game.Level.Enemies {
+		UpdateEnemy(game, enemy)
+	}
+	for _, effect := range game.Level.Effects {
+		effect.Update(game)
+	}
 	game.Level.Update(game) // Check win/loss conditions
 }
 
@@ -346,7 +355,7 @@ func (game *Game) ValidatePlayer(playerid string) error {
 // Rendering & UI Engine
 // ---------------------------------------------------------------------------
 
-func (game *Game) DrawLevelForPlayer(level Level, player *Player) string {
+func (game *Game) DrawLevelForPlayer(level *Level, player *Player) string {
 	if !player.IsAlive() {
 		return game.DrawGameOverForPlayer(level, player)
 	}
@@ -360,7 +369,7 @@ func (game *Game) DrawLevelForPlayer(level Level, player *Player) string {
 	return game.FlushFrame()
 }
 
-func (game *Game) DrawSummaryScreenForPlayer(level Level, player *Player, summaryLines []string) string {
+func (game *Game) DrawSummaryScreenForPlayer(level *Level, player *Player, summaryLines []string) string {
 	game.ClearFrame()
 	game.DrawLogsPanel()
 	game.DrawGlobalChatPanel(level, player)
@@ -386,7 +395,7 @@ func (game *Game) DrawSummaryScreenForPlayer(level Level, player *Player, summar
 	return game.FlushFrame()
 }
 
-func (game *Game) DrawLevelIntermissionForPlayer(level Level, player *Player) string {
+func (game *Game) DrawLevelIntermissionForPlayer(level *Level, player *Player) string {
 	if !player.IsAlive() {
 		return game.DrawGameOverForPlayer(level, player)
 	}
@@ -397,7 +406,7 @@ func (game *Game) DrawLevelIntermissionForPlayer(level Level, player *Player) st
 	return game.DrawSummaryScreenForPlayer(level, player, GetSummaryLines(summary, player.GetQuitKey()))
 }
 
-func (game *Game) DrawGameOverForPlayer(level Level, player *Player) string {
+func (game *Game) DrawGameOverForPlayer(level *Level, player *Player) string {
 	var summary PlayerSessionSummary
 	if player != nil {
 		summary = player.GenerateSummary()
@@ -413,7 +422,7 @@ func (game *Game) ClearFrame() {
 	}
 }
 
-func (game *Game) DrawEntities(level Level) {
+func (game *Game) DrawEntities(level *Level) {
 	for _, entity := range level.Entities {
 		if drawable, ok := entity.(Drawable); ok {
 			game.DrawObject(level, drawable)
@@ -421,13 +430,13 @@ func (game *Game) DrawEntities(level Level) {
 	}
 }
 
-func (game *Game) DrawEffects(level Level) {
+func (game *Game) DrawEffects(level *Level) {
 	for _, effect := range level.Effects {
 		game.DrawObject(level, effect)
 	}
 }
 
-func (game *Game) DrawObject(level Level, obj Drawable) {
+func (game *Game) DrawObject(level *Level, obj Drawable) {
 
 	X, Y := LevelSizeX, LevelSizeY
 	pos := obj.GetPosition()
@@ -444,7 +453,7 @@ func (game *Game) DrawObject(level Level, obj Drawable) {
 	}
 }
 
-func (game *Game) DrawGlobalChatPanel(level Level, player *Player) {
+func (game *Game) DrawGlobalChatPanel(level *Level, player *Player) {
 	gameStartCol := MaxMessageLength + 3
 	chatStartCol := gameStartCol + LevelSizeX + 3
 
@@ -570,13 +579,6 @@ func (game *Game) BroadcastGameChat(playerid string, message string) {
 	select {
 	case game.GameChat <- msg:
 	default:
-	}
-}
-func UpdateMap[T any](m map[string]T, game *Game) {
-	for _, item := range m {
-		if updateable, ok := any(item).(Updateable); ok {
-			updateable.Update(game)
-		}
 	}
 }
 

@@ -48,4 +48,5 @@ func main() {
 	if err := srv.Run(ctx, ":8080"); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
+
 }
