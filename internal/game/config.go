@@ -19,6 +19,7 @@ const (
 	//SymbolPlayer     = '❤'
 	//SymbolPlayer     = '⊙'
 	SymbolArcher         = '★'
+	SymbolImp            = 'i'
 	SymbolPlayer         = '⊗'
 	SymbolGoblin         = '¶'
 	SymbolWallDefault    = '#'
@@ -58,6 +59,7 @@ const (
 	EnemyDefaultAttackSpeed            = 15
 	EnemyDefaultExperience             = 10
 	ArcherDefaultExperience            = EnemyDefaultExperience * 3
+	ImpDefaultExperience               = EnemyDefaultExperience * 9
 	GoblinDefaultExperience            = EnemyDefaultExperience
 	PlayerLevelOneExperience           = 10
 	PlayerLevelXpRequirementMultiplier = 1.1

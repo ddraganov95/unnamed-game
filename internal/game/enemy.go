@@ -27,6 +27,7 @@ const (
 	EnemyUnknown EnemyType = iota
 	EnemyGoblin
 	EnemyArcher
+	EnemyImp
 )
 
 var EnemyBlueprints map[EnemyType]Enemy
@@ -55,6 +56,17 @@ func InitEnemyBlueprints() {
 			ProjectileSpeed:  ProjectileDefaultTravelSpeed * 15,
 			DamageMultiplier: float64(EnemyDefaultDamageMultipier-30) / 100.0,
 			VoiceLine:        "STOP HITTING ME!!!!",
+		},
+		EnemyImp: {
+			MaxHealth:        700,
+			Symbol:           SymbolImp,
+			Score:            15,
+			ExperienceVal:    ImpDefaultExperience,
+			EquippedAttack:   AttackSpell,
+			MaxMovementSpeed: EnemyDefaultMovementSpeed + 20,
+			MaxAttackSpeed:   EnemyDefaultAttackSpeedRanged,
+			ProjectileSpeed:  ProjectileDefaultTravelSpeed * 10,
+			DamageMultiplier: EnemyDefaultDamageMultipier,
 		},
 	}
 }
@@ -85,6 +97,12 @@ func InitSpawnRules() {
 			EnemyType: EnemyArcher,
 			CalcCount: CalculateArchersPerLevel,
 			MinLevel:  4,
+			MaxLevel:  100,
+		},
+		{
+			EnemyType: EnemyImp,
+			CalcCount: CalculateImpsPerLevel,
+			MinLevel:  8,
 			MaxLevel:  100,
 		},
 	}
@@ -125,6 +143,8 @@ func (t EnemyType) String() string {
 		return "Goblin"
 	case EnemyArcher:
 		return "Archer"
+	case EnemyImp:
+		return "Imp"
 	default:
 		return "unknown"
 	}
@@ -390,6 +410,9 @@ func CalculateGoblinsPerLevel(playerLevel int) int {
 }
 func CalculateArchersPerLevel(playerLevel int) int {
 	return 1 + playerLevel/4
+}
+func CalculateImpsPerLevel(playerLevel int) int {
+	return 1 + playerLevel/10
 }
 func (enemy *Enemy) CheckDeath(game *Game) {
 	if !enemy.IsAlive() {
