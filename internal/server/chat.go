@@ -5,11 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"time"
 
 	"unnamed-game/internal/game"
-
-	"github.com/gorilla/websocket"
 )
 
 func (server *Server) BroadcastGlobalMessage(msg string) {
@@ -18,12 +15,10 @@ func (server *Server) BroadcastGlobalMessage(msg string) {
 	if len(server.chatHistory) > game.MaxChatHistory {
 		server.chatHistory = server.chatHistory[1:]
 	}
-
-	for conn := range server.lobbyConns {
-		conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
-		if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
-			conn.Close()
-			delete(server.lobbyConns, conn)
+	for _, connection := range server.lobbyConns {
+		select {
+		case connection.Write <- msg:
+		default:
 		}
 	}
 	server.lobbyMu.Unlock()

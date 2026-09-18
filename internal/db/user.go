@@ -38,7 +38,7 @@ type User struct {
 
 func (db *Database) UpsertUser(ctx context.Context, playerID string) (*UserRef, error) {
 	var ref UserRef
-	err := db.Pool.QueryRow(ctx, upsertUserQuery, playerID).Scan(&ref.UserID, &ref.PlayerID)
+	err := db.pool.QueryRow(ctx, upsertUserQuery, playerID).Scan(&ref.UserID, &ref.PlayerID)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (db *Database) UpdatePlayerAfterDisconnect(
 	return &user, nil
 }
 func (db *Database) FetchUserSummary(ctx context.Context, userID string) (*User, error) {
-	rows, err := db.Pool.Query(ctx, GetUserSummary, userID)
+	rows, err := db.pool.Query(ctx, GetUserSummary, userID)
 	if err != nil {
 		log.Printf("[DB ERROR]:GET User Summary query fail %v", err) // Print full error description
 		return nil, fmt.Errorf("failed to scan updated user: %w", err)

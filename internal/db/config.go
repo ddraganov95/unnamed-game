@@ -49,7 +49,7 @@ func GetActionLabel(action string) string {
 func (db *Database) FetchUserConfiguration(ctx context.Context, userID uuid.UUID) (UserConfiguration, error) {
 	var rawBytes []byte
 
-	err := db.Pool.QueryRow(ctx, GetUserConfiguration, userID).Scan(&rawBytes)
+	err := db.pool.QueryRow(ctx, GetUserConfiguration, userID).Scan(&rawBytes)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DefaultUserConfiguration, nil
@@ -70,7 +70,7 @@ func (db *Database) UpsertUserConfiguration(ctx context.Context, userID uuid.UUI
 		return fmt.Errorf("failed to marshal user config: %w", err)
 	}
 
-	_, err = db.Pool.Exec(ctx, UpsertUserConfig, userID, configBytes)
+	_, err = db.pool.Exec(ctx, UpsertUserConfig, userID, configBytes)
 	if err != nil {
 		return fmt.Errorf("failed to upsert user config: %w", err)
 	}

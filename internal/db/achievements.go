@@ -10,7 +10,7 @@ import (
 )
 
 func (db *Database) FetchAchievementCatalog(ctx context.Context) ([]game.AchCatalogDTO, error) {
-	rows, err := db.Pool.Query(ctx, GetAchievementCatalog)
+	rows, err := db.pool.Query(ctx, GetAchievementCatalog)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch achievements: %w", err)
 	}
@@ -47,7 +47,7 @@ func (db *Database) FetchAchievementCatalog(ctx context.Context) ([]game.AchCata
 	return catalog, rows.Err()
 }
 func (db *Database) FetchPlayerProgress(ctx context.Context, userID uuid.UUID) ([]game.AchProgressDTO, error) {
-	rows, err := db.Pool.Query(ctx, GetPlayerFullAchievementState, userID)
+	rows, err := db.pool.Query(ctx, GetPlayerFullAchievementState, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch player achievement state: %w", err)
 	}

@@ -11,7 +11,6 @@ import (
 	"unnamed-game/internal/game"
 
 	"github.com/gorilla/websocket"
-	"github.com/jackc/pgx/v5"
 )
 
 func (server *Server) InitializeConnection(g *game.Game, username string) error {
@@ -33,7 +32,7 @@ func (server *Server) InitializeConnection(g *game.Game, username string) error 
 	return nil
 }
 
-func (server *Server) RegisterPlayer(g *game.Game, playerID string, conn *WSConnection) error {
+func (server *Server) RegisterPlayer(g *game.Game, playerID string, conn *GameWSConnection) error {
 	userID, err := uuid.Parse(conn.UserID)
 	if err != nil {
 		return errors.New("Invalid user ID format in session")
@@ -216,7 +215,7 @@ func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string)
 	}
 	server.DisconnectPlayer(g, playerID, connection)
 }
-func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn *WSConnection) {
+func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn *GameWSConnection) {
 	server.mu.Lock()
 	if activeConn, exists := server.activeConns[playerID]; exists && activeConn.Conn == targetConn.Conn {
 		delete(server.activeConns, playerID)
@@ -228,50 +227,5 @@ func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn
 	g.EventChan <- game.GameEvent{
 		Type:     game.EventTypeDisconnect,
 		PlayerID: playerID,
-	}
-}
-func (server *Server) ListenToDBEvents(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		connConfig := server.db.Pool.Config().ConnConfig
-		conn, err := pgx.ConnectConfig(ctx, connConfig)
-		if err != nil {
-			log.Printf("[DB ERROR] Failed to connect for listening to events: %v", err)
-			return
-		}
-		defer conn.Close(ctx)
-
-		dbEvents := []string{"achievement_unlocked", "global_chat"}
-		for _, event := range dbEvents {
-			if _, err := conn.Exec(ctx, fmt.Sprintf("LISTEN %s", event)); err != nil {
-				log.Printf("[DB ERROR] Failed to listen to event %s: %v", event, err)
-				return
-			}
-		}
-		for {
-			notification, err := conn.WaitForNotification(ctx)
-			if err != nil {
-				if ctx.Err() != nil {
-					log.Printf("[DB ERROR] Context error while waiting for notification: %v", err)
-				} else {
-					log.Printf("[DB ERROR] Error while waiting for notification: %v", err)
-				}
-				return
-			}
-			switch notification.Channel {
-			case "achievement_unlocked":
-				log.Printf("[DB EVENT] Received notification for achievement unlocked: %s", notification.Payload)
-				server.handleAchievementUnlockedEvent(notification.Payload)
-			case "global_chat":
-				log.Printf("[DB EVENT] Received notification for message: %s", notification.Payload)
-				server.BroadcastGlobalMessage(notification.Payload)
-			default:
-				log.Printf("[DB EVENT] Received notification for unknown channel: %s", notification.Channel)
-			}
-		}
 	}
 }

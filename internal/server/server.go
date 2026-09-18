@@ -21,11 +21,11 @@ type Server struct {
 	lobbyMu        sync.Mutex
 	Upgrader       websocket.Upgrader
 	chatHistory    []string
-	activeConns    map[string]*WSConnection
+	activeConns    map[string]*GameWSConnection
 	activeGames    map[uuid.UUID]*game.Game
 	playerSessions map[string]uuid.UUID
 	playerUsers    map[string]uuid.UUID
-	lobbyConns     map[*websocket.Conn]bool
+	lobbyConns     map[string]*ChatWSConnection
 	achievementCat *game.AchievementCatalog
 	db             *db.Database
 	Mux            *http.ServeMux
@@ -33,12 +33,20 @@ type Server struct {
 	globalChat     chan string
 	PlayerCounter  uint64
 }
-type WSConnection struct {
+type GameWSConnection struct {
 	Ctx      context.Context
 	Cancel   context.CancelFunc
 	Conn     *websocket.Conn
 	UserID   string
 	PlayerID string
+}
+type ChatWSConnection struct {
+	Ctx      context.Context
+	Cancel   context.CancelFunc
+	Conn     *websocket.Conn
+	UserID   string
+	PlayerID string
+	Write    chan string
 }
 type OutboundWSMessage struct {
 	Type    string `json:"type"`
@@ -81,10 +89,10 @@ func NewServer(ctx context.Context) (*Server, error) {
 				return true
 			},
 		},
-		activeConns:    make(map[string]*WSConnection),
+		activeConns:    make(map[string]*GameWSConnection),
 		activeGames:    make(map[uuid.UUID]*game.Game),
 		playerSessions: make(map[string]uuid.UUID),
-		lobbyConns:     make(map[*websocket.Conn]bool),
+		lobbyConns:     make(map[string]*ChatWSConnection),
 		playerUsers:    make(map[string]uuid.UUID),
 		globalChat:     make(chan string, game.MaxChatHistory),
 		Mux:            http.NewServeMux(),
@@ -92,7 +100,8 @@ func NewServer(ctx context.Context) (*Server, error) {
 		achievementCat: catalog,
 	}
 	game.InitGameRegistries()
-	go srv.ListenToDBEvents(ctx)
+	events := []string{"achievement_unlocked", "global_chat"}
+	go database.ListenToDBEvents(ctx, events, srv.handleDBEvent)
 	return srv, nil
 }
 

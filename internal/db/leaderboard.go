@@ -17,7 +17,7 @@ type UserLeaderboardView struct {
 }
 
 func (db *Database) FetchUserLeaderboard(ctx context.Context, userID uuid.UUID, pageSize int) ([]UserLeaderboardView, error) {
-	rows, err := db.Pool.Query(ctx, GetUserLeaderboardPage, userID, pageSize)
+	rows, err := db.pool.Query(ctx, GetUserLeaderboardPage, userID, pageSize)
 	if err != nil {
 		log.Printf("[DB ERROR]: GET User Leaderboard query fail %v", err)
 		return nil, fmt.Errorf("failed to query user leaderboard page: %w", err)
@@ -32,7 +32,7 @@ func (db *Database) FetchUserLeaderboard(ctx context.Context, userID uuid.UUID, 
 	return users, nil
 }
 func (db *Database) FetchLeaderboardPage(ctx context.Context, pageNum int, pageSize int) ([]UserLeaderboardView, error) {
-	rows, err := db.Pool.Query(ctx, GetLeaderboardPage, pageSize, (pageNum-1)*pageSize)
+	rows, err := db.pool.Query(ctx, GetLeaderboardPage, pageSize, (pageNum-1)*pageSize)
 	if err != nil {
 		log.Printf("[DB ERROR]: GET User Leaderboard query fail %v", err)
 		return nil, fmt.Errorf("failed to query user leaderboard page: %w", err)

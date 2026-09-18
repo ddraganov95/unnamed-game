@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"unnamed-game/internal/db"
 	"unnamed-game/internal/game"
@@ -17,6 +18,16 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func (server *Server) handleDBEvent(channel, payload string) {
+	switch channel {
+	case "achievement_unlocked":
+		server.handleAchievementUnlockedEvent(payload)
+	case "global_chat":
+		server.BroadcastGlobalMessage(payload)
+	default:
+		log.Printf("[DB EVENT] Unhandled channel: %s", channel)
+	}
+}
 func (server *Server) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -150,7 +161,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithCancel(r.Context())
-	newConnection := &WSConnection{
+	newConnection := &GameWSConnection{
 		Conn:     conn,
 		Ctx:      ctx,
 		Cancel:   cancel,
@@ -169,7 +180,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) {
-	_, playerID, err := ExtractSessionIDs(r)
+	userID, playerID, err := ExtractSessionIDs(r)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -180,10 +191,25 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 		log.Println("Error connecting to global chat")
 		return
 	}
-
+	ctx, cancel := context.WithCancel(r.Context())
 	server.lobbyMu.Lock()
-	server.lobbyConns[conn] = true
-
+	chatConn := &ChatWSConnection{
+		Conn:     conn,
+		Ctx:      ctx,
+		Cancel:   cancel,
+		UserID:   userID,
+		PlayerID: playerID,
+		Write:    make(chan string, 50),
+	}
+	server.lobbyConns[playerID] = chatConn
+	go func() {
+		for msg := range chatConn.Write {
+			conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
+				break
+			}
+		}
+	}()
 	for _, historyMsg := range server.chatHistory {
 		if err := conn.WriteMessage(websocket.TextMessage, []byte(historyMsg)); err != nil {
 			break
@@ -193,8 +219,9 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 
 	defer func() {
 		server.lobbyMu.Lock()
-		delete(server.lobbyConns, conn)
+		delete(server.lobbyConns, playerID)
 		server.lobbyMu.Unlock()
+		close(chatConn.Write)
 		conn.Close()
 	}()
 

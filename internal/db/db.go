@@ -21,7 +21,7 @@ import (
 var schemaFS embed.FS
 
 type Database struct {
-	Pool *pgxpool.Pool
+	pool *pgxpool.Pool
 }
 
 type DBConfig struct {
@@ -62,7 +62,7 @@ func NewDatabase() (*Database, error) {
 		return nil, err
 	}
 	log.Println("[DB] Successfully connected and updated USERS table schema.")
-	return &Database{Pool: pool}, nil
+	return &Database{pool: pool}, nil
 }
 func InitSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	tx, err := pool.Begin(ctx)
@@ -146,7 +146,7 @@ func (db *Database) CallProcedure(ctx context.Context, name string, args ...any)
 	query := fmt.Sprintf("CALL %s(%s);", name, strings.Join(placeholders, ", "))
 
 	// Use db.Pool.Exec (pgx standard) instead of ExecContext
-	_, err := db.Pool.Exec(ctx, query, args...)
+	_, err := db.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("procedure call failed (%s): %w", name, err)
 	}
@@ -162,7 +162,7 @@ func (db *Database) QueryOne[T any](ctx context.Context, name string, args ...an
 
 	query := fmt.Sprintf("SELECT * FROM %s(%s);", name, strings.Join(placeholders, ", "))
 
-	rows, err := db.Pool.Query(ctx, query, args...)
+	rows, err := db.pool.Query(ctx, query, args...)
 	if err != nil {
 		return result, fmt.Errorf("query failed (%s): %w", name, err)
 	}
@@ -192,10 +192,56 @@ func (db *Database) CallFunction(ctx context.Context, name string, args ...any) 
 
 	query := fmt.Sprintf("SELECT %s(%s);", name, strings.Join(placeholders, ", "))
 
-	_, err := db.Pool.Exec(ctx, query, args...)
+	_, err := db.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("function call failed (%s): %w", name, err)
 	}
 
 	return nil
+}
+
+type NotificationHandler func(channel, payload string)
+
+func (db *Database) ListenToDBEvents(ctx context.Context, channels []string, handler NotificationHandler) {
+	if err := db.listenLoop(ctx, channels, handler); err != nil {
+		if ctx.Err() != nil {
+			log.Println("[DB LISTEN] Shutdown signal received. Stopping listener.")
+			return
+		}
+
+		// If it was a network failure, log and retry with a backoff delay
+		log.Printf("[DB ERROR] Listener connection lost: %v. Reconnecting in 2s...", err)
+
+		select {
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+func (db *Database) listenLoop(ctx context.Context, channels []string, handler NotificationHandler) error {
+	connConfig := db.pool.Config().ConnConfig
+	conn, err := pgx.ConnectConfig(ctx, connConfig)
+	if err != nil {
+		return fmt.Errorf("failed to connect: %w", err)
+	}
+	defer conn.Close(ctx)
+
+	for _, channel := range channels {
+		if _, err := conn.Exec(ctx, fmt.Sprintf("LISTEN %s", pgx.Identifier{channel}.Sanitize())); err != nil {
+			return fmt.Errorf("failed to listen on channel %s: %w", channel, err)
+		}
+	}
+
+	log.Printf("[DB LISTEN] Listening on channels: %v", channels)
+
+	for {
+		// WaitForNotification unblocks instantly when ctx is canceled
+		notification, err := conn.WaitForNotification(ctx)
+		if err != nil {
+			return err // Return to outer loop to determine if we exit or reconnect
+		}
+
+		handler(notification.Channel, notification.Payload)
+	}
 }
