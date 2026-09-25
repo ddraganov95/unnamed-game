@@ -12,20 +12,20 @@ const (
 const (
 	GetUserSummary = `
 	Select 
-	user_id,
-	player_id,
-	total_enemies_killed,
-	total_xp_gained,
-	total_damage_dealt,
-	total_damage_taken,
-	total_levels_completed,
-	total_game_time,
-	total_deaths,
-	highest_player_level,
-	total_achievement_points
-	highest_score
-	FROM users
-	WHERE user_id = $1;
+	u.user_id,
+	u.player_id,
+	us.total_enemies_killed,
+	us.total_xp_gained,
+	us.total_damage_dealt,
+	us.total_damage_taken,
+	us.total_levels_completed,
+	us.total_game_time,
+	us.total_deaths,
+	us.highest_player_level,
+	us.total_achievement_points,
+	us.highest_score
+	FROM user_stats us JOIN users u ON u.user_id = us.user_id
+	WHERE us.user_id = $1;
 	`
 )
 const GetPlayerFullAchievementState = `

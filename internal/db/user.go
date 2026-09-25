@@ -67,7 +67,7 @@ func (db *Database) UpdatePlayerAfterDisconnect(
 		achJSON = []byte("[]")
 	}
 
-	user, err := db.QueryOne[UserStats](ctx, "update_player_after_disconnect",
+	userStats, err := db.QueryOne[UserStats](ctx, "update_player_after_disconnect",
 		userID,
 		summary.XPGained,
 		summary.EnemiesKilled,
@@ -84,19 +84,35 @@ func (db *Database) UpdatePlayerAfterDisconnect(
 		return nil, err
 	}
 
-	return &user, nil
+	return &userStats, nil
 }
-func (db *Database) FetchUserSummary(ctx context.Context, userID string) (*User, error) {
+
+type UserProfileSummary struct {
+	UserID                 uuid.UUID `db:"user_id" json:"user_id"`
+	PlayerID               string    `db:"player_id" json:"player_id"`
+	TotalEnemiesKilled     int       `db:"total_enemies_killed" json:"total_enemies_killed"`
+	TotalXPGained          int64     `db:"total_xp_gained" json:"total_xp_gained"`
+	TotalDamageDealt       int64     `db:"total_damage_dealt" json:"total_damage_dealt"`
+	TotalDamageTaken       int64     `db:"total_damage_taken" json:"total_damage_taken"`
+	TotalLevelsCompleted   int       `db:"total_levels_completed" json:"total_levels_completed"`
+	TotalGameTime          int64     `db:"total_game_time" json:"total_game_time"`
+	TotalDeaths            int       `db:"total_deaths" json:"total_deaths"`
+	HighestPlayerLevel     int       `db:"highest_player_level" json:"highest_player_level"`
+	TotalAchievementPoints int       `db:"total_achievement_points" json:"total_achievement_points"`
+	HighestScore           int       `db:"highest_score" json:"highest_score"`
+}
+
+func (db *Database) FetchUserSummary(ctx context.Context, userID string) (*UserProfileSummary, error) {
 	rows, err := db.pool.Query(ctx, GetUserSummary, userID)
 	if err != nil {
 		log.Printf("[DB ERROR]:GET User Summary query fail %v", err) // Print full error description
 		return nil, fmt.Errorf("failed to scan updated user: %w", err)
 	}
-	user, err := pgx.CollectOneRow(rows, pgx.RowToStructByNameLax[User])
+	userProfile, err := pgx.CollectOneRow(rows, pgx.RowToStructByNameLax[UserProfileSummary])
 	if err != nil {
 		log.Printf("[DB ERROR]: %v", err) // Print full error description
 		return nil, fmt.Errorf("failed to scan updated user: %w", err)
 	}
 
-	return &user, nil
+	return &userProfile, nil
 }
