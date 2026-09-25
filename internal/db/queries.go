@@ -10,29 +10,6 @@ const (
 	`
 )
 const (
-	UptateUserWithSummary = `
-	UPDATE users
-	SET total_xp_gained = total_xp_gained + $2,
-	total_enemies_killed = total_enemies_killed + $3,
-	total_damage_dealt = total_damage_dealt + $4,
-	total_damage_taken = total_damage_taken + $5,
-	total_levels_completed = total_levels_completed + $6,
-	total_game_time = total_game_time + $7,
-	total_deaths = total_deaths + $8,
-	highest_player_level = GREATEST(highest_player_level, $9)
-	WHERE player_id = $1
-	RETURNING player_id,
-	total_xp_gained,
-	total_enemies_killed,
-	total_damage_dealt,
-	total_damage_taken,
-	total_levels_completed,
-	total_game_time,
-	total_deaths,
-	highest_player_level;
-	`
-)
-const (
 	GetUserSummary = `
 	Select 
 	user_id,
@@ -69,12 +46,12 @@ const GetAchievementCatalog = `SELECT achievement_id, code, title, description, 
 const GetUserLeaderboardPage = `
 WITH ranked_users AS (
     SELECT 
-        user_id,
-        player_id, 
-        highest_score, 
-        created_at,
-        ROW_NUMBER() OVER (ORDER BY highest_score DESC, created_at ASC)::INT AS rank
-    FROM users
+        us.user_id,
+        u.player_id, 
+        us.highest_score, 
+        us.highest_score_achieved_at,
+        ROW_NUMBER() OVER (ORDER BY us.highest_score DESC, us.highest_score_achieved_at ASC)::INT AS rank
+    FROM user_stats us join users u on u.user_id = us.user_id
 ),
 target_user AS (
     SELECT rank FROM ranked_users WHERE user_id = $1
@@ -91,11 +68,11 @@ LIMIT $2 + 1;
 `
 const GetLeaderboardPage = `
 SELECT 
-    user_id,
-    player_id, 
-    highest_score,
-    ROW_NUMBER() OVER (ORDER BY highest_score DESC, created_at ASC)::INT as rank
-FROM users
+    	us.user_id,
+        u.player_id, 
+        us.highest_score, 
+        ROW_NUMBER() OVER (ORDER BY us.highest_score DESC, us.highest_score_achieved_at ASC)::INT AS rank
+ FROM user_stats us join users u on u.user_id = us.user_id
 ORDER BY rank ASC
 LIMIT $1 OFFSET $2
 ;

@@ -336,11 +336,8 @@ func (server *Server) HandleGetSelfAchievements(w http.ResponseWriter, r *http.R
 
 const LeaderBoardPageSize = 10 //NUMBER OF ROWS SHOWN ON THE LEADERBOARD
 type SelfLeaderboardReponse struct {
-	CurrentUser           db.UserLeaderboardView   `json:"CurrentUser"`
-	UsersOnPage           []db.UserLeaderboardView `json:"UsersOnPage"`
-	CurrentPage           int                      `json:"CurrentPage"`
-	NextPageAvailable     bool                     `json:"NextPageAvailable"`
-	PreviousPageAvailable bool                     `json:"PreviousPageAvailable"`
+	LeaderboardReponse
+	CurrentUser db.UserLeaderboardView `json:"CurrentUser"`
 }
 
 func (server *Server) HandleGetSelfLeaderboard(w http.ResponseWriter, r *http.Request) {
@@ -370,7 +367,7 @@ func (server *Server) HandleGetSelfLeaderboard(w http.ResponseWriter, r *http.Re
 		log.Printf("[DB] %s,%s", userID.String(), err)
 	}
 
-	// Correct page calculation math
+	//page calculation math
 	currentPage := 1
 	if currentuser.Rank > 0 {
 		currentPage = ((currentuser.Rank - 1) / LeaderBoardPageSize) + 1
@@ -433,7 +430,7 @@ func (server *Server) HandleLeaderboard(w http.ResponseWriter, r *http.Request) 
 	if err != nil || page < 1 {
 		page = 1
 	}
-	usersOnLeaderboard, err := server.db.FetchLeaderboardPage(r.Context(), page, LeaderBoardPageSize+1)
+	usersOnLeaderboard, err := server.db.FetchLeaderboardPage(r.Context(), page, LeaderBoardPageSize)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

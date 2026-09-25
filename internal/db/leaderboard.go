@@ -32,7 +32,9 @@ func (db *Database) FetchUserLeaderboard(ctx context.Context, userID uuid.UUID, 
 	return users, nil
 }
 func (db *Database) FetchLeaderboardPage(ctx context.Context, pageNum int, pageSize int) ([]UserLeaderboardView, error) {
-	rows, err := db.pool.Query(ctx, GetLeaderboardPage, pageSize, (pageNum-1)*pageSize)
+	offset := (pageNum - 1) * pageSize
+	fetchLimit := pageSize + 1
+	rows, err := db.pool.Query(ctx, GetLeaderboardPage, fetchLimit, offset)
 	if err != nil {
 		log.Printf("[DB ERROR]: GET User Leaderboard query fail %v", err)
 		return nil, fmt.Errorf("failed to query user leaderboard page: %w", err)

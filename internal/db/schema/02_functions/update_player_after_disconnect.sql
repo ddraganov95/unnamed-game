@@ -11,7 +11,7 @@ CREATE OR REPLACE FUNCTION update_player_after_disconnect(
     p_score_gained INT,
     p_achievements JSONB
 )
-RETURNS SETOF users
+RETURNS SETOF user_stats
 LANGUAGE plpgsql
 AS $$
 DECLARE
@@ -42,7 +42,7 @@ BEGIN
     END IF;
 
     RETURN QUERY
-    UPDATE users
+    UPDATE user_stats
     SET total_xp_gained          = total_xp_gained + p_xp_gained,
         total_enemies_killed     = total_enemies_killed + p_enemies_killed,
         total_damage_dealt       = total_damage_dealt + p_damage_dealt,
@@ -51,7 +51,8 @@ BEGIN
         total_game_time          = total_game_time + p_game_time,
         total_deaths             = total_deaths + p_deaths,
         highest_player_level     = GREATEST(highest_player_level, p_player_level),
-        highest_score            = GREATEST(highest_score, p_score_gained)
+        highest_score            = GREATEST(highest_score, p_score_gained),
+        highest_score_achieved_at = CASE WHEN $10 > highest_score THEN NOW() ELSE highest_score_achieved_at END
     WHERE user_id = p_user_id
     RETURNING *;
 END;

@@ -17,12 +17,15 @@ type UserRef struct {
 	UserID   uuid.UUID `db:"user_id" json:"user_id"`
 	PlayerID string    `db:"player_id" json:"player_id"`
 }
-
 type User struct {
-	LastLogin              time.Time `db:"last_login" json:"last_login"`
-	CreatedAt              time.Time `db:"created_at" json:"created_at"`
+	UserID    uuid.UUID `db:"user_id" json:"user_id"`
+	PlayerID  string    `db:"player_id" json:"player_id"`
+	LastLogin time.Time `db:"last_login" json:"last_login"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+type UserStats struct {
 	UserID                 uuid.UUID `db:"user_id" json:"user_id"`
-	PlayerID               string    `db:"player_id" json:"player_id"`
 	TotalXPGained          int64     `db:"total_xp_gained" json:"total_xp_gained"`
 	TotalDamageDealt       int64     `db:"total_damage_dealt" json:"total_damage_dealt"`
 	TotalDamageTaken       int64     `db:"total_damage_taken" json:"total_damage_taken"`
@@ -33,7 +36,7 @@ type User struct {
 	TotalEnemiesKilled     int       `db:"total_enemies_killed" json:"total_enemies_killed"`
 	TotalAchievementPoints int       `db:"total_achievement_points" json:"total_achievement_points"`
 	HighestScore           int       `db:"highest_score" json:"highest_score"`
-	Rank                   int       `db:"rank" json:"rank"`
+	HighestScoreAchievedAt time.Time `db:"highest_score_achieved_at" json:"highest_score_achieved_at"`
 }
 
 func (db *Database) UpsertUser(ctx context.Context, playerID string) (*UserRef, error) {
@@ -50,7 +53,7 @@ func (db *Database) UpdatePlayerAfterDisconnect(
 	userID uuid.UUID,
 	summary game.PlayerSessionSummary,
 	dtoList []game.AchProgressDTO,
-) (*User, error) {
+) (*UserStats, error) {
 	gameTimeSeconds := int64(summary.SessionDuration.Seconds())
 
 	var achJSON []byte
@@ -64,7 +67,7 @@ func (db *Database) UpdatePlayerAfterDisconnect(
 		achJSON = []byte("[]")
 	}
 
-	user, err := db.QueryOne[User](ctx, "update_player_after_disconnect",
+	user, err := db.QueryOne[UserStats](ctx, "update_player_after_disconnect",
 		userID,
 		summary.XPGained,
 		summary.EnemiesKilled,
