@@ -196,7 +196,7 @@ func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string)
 	log.Printf("[DISCONNECT DEBUG] PlayerID: '%s' maps to UserID: '%s'", playerID, userID)
 	log.Printf("[DISCONNECT DEBUG] Exported Achievement Progress payload type: %T, value: %+v", achievementProgress, achievementProgress)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	user, err := server.db.UpdatePlayerAfterDisconnect(ctx, userID, player.GenerateSummary(), achievementProgress)
+	user_stats, err := server.db.UpdatePlayerAfterDisconnect(ctx, userID, player.GenerateSummary(), achievementProgress)
 	cancel()
 	achievementPayload := g.AchievementEngine.BuildClientAchievementPayload(player.PlayerID)
 	if err != nil {
@@ -206,7 +206,8 @@ func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string)
 		if exists {
 			connection.Conn.WriteJSON(map[string]any{
 				"type":         "session_summary",
-				"user":         user,
+				"player_id":    playerID,
+				"user_stats":   user_stats,
 				"achievements": achievementPayload,
 			})
 			log.Printf("[DB] Successfully SENT session summary for %s\n", playerID)

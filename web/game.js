@@ -44,11 +44,13 @@
         }
 
         if (data && data.type === "session_summary") {
-            const userData = data.user || data.payload;
+            const userData = data.user_stats || data.payload;
+            if (data.player_id){
+                localStorage.setItem('player_id', data.player_id);
+            }
             if (userData) {
                 localStorage.setItem('user_stats', JSON.stringify(userData));
             }
-            
             // Cache achievements if sent by the backend
             if (data.achievements) {
                 localStorage.setItem('user_achievements', JSON.stringify(data.achievements));

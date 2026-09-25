@@ -143,7 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const elDeaths = document.getElementById('stat-deaths');
             const elGameTime = document.getElementById('stat-game-time');
 
-            if (elPlayerId) elPlayerId.textContent = userData.player_id || '--';
+            if (elPlayerId) elPlayerId.textContent = userData.player_id || localStorage.getItem('player_id') || '--';
             if (elHighestLevel) elHighestLevel.textContent = userData.highest_player_level ?? 1;
             if (elLevels) elLevels.textContent = userData.total_levels_completed ?? 0;
             if (elEnemies) elEnemies.textContent = userData.total_enemies_killed ?? 0;
@@ -415,7 +415,10 @@ function updateUserStatsCache(currentUserData) {
     }
     stats.rank = currentUserData.Rank;
     stats.highest_score = currentUserData.HighestScore;
-    stats.player_id = currentUserData.PlayerID;
+    const player_id = localStorage.getItem('player_id');
+    if (player_id){
+    stats.player_id = player_id;
+    }
     localStorage.setItem('user_stats', JSON.stringify(stats));
 }
 

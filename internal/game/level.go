@@ -54,7 +54,6 @@ func NewLevel(game *Game) {
 		}
 		game.SpawnPlayer(player)
 		player.HealToFull()
-		player.LevelsCompleted++
 	}
 
 	fmt.Println("Players Spawned...")
