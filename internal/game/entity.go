@@ -67,9 +67,10 @@ func (level *Level) AddProjectile(projectile *Projectile) {
 	level.Projectiles = append(level.Projectiles, projectile)
 }
 
-func (level *Level) AddEnemy(enemy *Enemy) {
-	level.AddEntity(enemy)
-	level.Enemies = append(level.Enemies, enemy)
+func (game *Game) AddEnemy(enemy *Enemy) {
+	game.Level.AddEntity(enemy)
+	game.Level.Enemies = append(game.Level.Enemies, enemy)
+	game.EnemiesSpawned++
 }
 
 func (level *Level) RemoveProjectile(projectile *Projectile) {

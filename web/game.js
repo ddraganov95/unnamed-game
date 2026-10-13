@@ -19,7 +19,7 @@
 
     // Connect to WebSocket — browser automatically attaches player_session HttpOnly cookie
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws?game_id=${encodeURIComponent(gameId)}`);
 
     let connectionEstablished = false;
 

@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_gane_events_game_id ON game_events(game_id);

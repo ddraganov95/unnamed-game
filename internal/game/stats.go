@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"uuid"
 )
 
 type Health struct {
@@ -37,6 +38,17 @@ type PlayerSessionSummary struct {
 	PlayerLevel     int           `json:"player_level"`
 	Deaths          int           `json:"player_deaths"`
 	Score           int           `json:"score"`
+}
+
+type GameSummary struct {
+	GameID           uuid.UUID `json:"game_id"`
+	TotalLevels      int       `json:"total_levels"`
+	PlayersConnected int       `json:"players_connected"`
+	LevelsCompleted  int       `json:"levels_completed"`
+	EnemiesSpawned   int       `json:"enemies_spawned"`
+	EnemiesKilled    int       `json:"enemies_killed"`
+	PlayerDeaths     int       `json:"player_deaths"`
+	EmptyMinutes     int       `json:"empty_minutes"`
 }
 
 var XpRequirements []int
@@ -85,6 +97,18 @@ func (player *Player) GenerateSummary() PlayerSessionSummary {
 		PlayerLevel:     player.Level,
 		Deaths:          deaths,
 		Score:           score,
+	}
+}
+func (game *Game) GenerateSummary() GameSummary {
+	return GameSummary{
+		GameID:           game.GameID,
+		TotalLevels:      game.TotalLevels,
+		PlayersConnected: len(game.Players),
+		EmptyMinutes:     game.EmptyMinutes,
+		LevelsCompleted:  game.LevelsCompleted,
+		EnemiesSpawned:   game.EnemiesSpawned,
+		EnemiesKilled:    game.EnemiesKilled,
+		PlayerDeaths:     game.PlayerDeaths,
 	}
 }
 func GetSummaryLines(summary PlayerSessionSummary, quitKey string) []string {

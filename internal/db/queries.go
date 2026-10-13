@@ -88,3 +88,28 @@ VALUES ($1, $2)
 ON CONFLICT (user_id) DO UPDATE
 SET config = EXCLUDED.config;
 `
+const InsertGame = `
+INSERT INTO games(game_id,server_host,status)
+VALUES($1, $2, $3)
+ON CONFLICT DO NOTHING;
+`
+const FindGameHostById = `
+SELECT server_host 
+FROM games 
+WHERE game_id = $1
+`
+const UpdateGameOnEnd = `
+        UPDATE games 
+        SET status = $1, ended_at = CURRENT_TIMESTAMP 
+        WHERE game_id = $2;
+
+        UPDATE games_stats 
+        SET total_levels = $3,
+            levels_completed = $4,
+            players_connected = $5,
+            player_deaths = $6,
+            enemies_spawned = $7,
+            enemies_killed = $8,
+            empty_minutes = $9
+        WHERE game_id = $2;
+    `
