@@ -20,6 +20,7 @@ type Server struct {
 	mu             sync.RWMutex
 	lobbyMu        sync.Mutex
 	Upgrader       websocket.Upgrader
+	serverConfig   ServerConfig
 	chatHistory    []string
 	activeConns    map[string]*GameWSConnection
 	activeGames    map[uuid.UUID]*game.Game
@@ -31,7 +32,10 @@ type Server struct {
 	Mux            *http.ServeMux
 	httpServer     *http.Server
 	globalChat     chan string
-	PlayerCounter  uint64
+}
+type ServerConfig struct {
+	Host string `json:"host"`
+	Port string `json:"port"`
 }
 type GameWSConnection struct {
 	Ctx      context.Context
@@ -53,14 +57,21 @@ type OutboundWSMessage struct {
 	Payload string `json:"payload"`
 }
 
-type GameRequest struct {
+type CreateUserRequest struct {
 	PlayerID string `json:"player_id"`
 }
 
 type GameResponse struct {
-	GameID string `json:"game_id"`
+	GameID      string `json:"game_id"`
+	RedirectURL string `json:"redirect_url"`
 }
 
+func NewConfig() ServerConfig {
+	return ServerConfig{
+		Host: db.GetEnv("HOST", "localhost"),
+		Port: db.GetEnv("PORT", "8080"),
+	}
+}
 func NewServer(ctx context.Context) (*Server, error) {
 	database, err := db.NewDatabase()
 	if err != nil {
@@ -98,13 +109,13 @@ func NewServer(ctx context.Context) (*Server, error) {
 		Mux:            http.NewServeMux(),
 		db:             database,
 		achievementCat: catalog,
+		serverConfig:   NewConfig(),
 	}
 	game.InitGameRegistries()
 	events := []string{"achievement_unlocked", "global_chat"}
 	go database.ListenToDBEvents(ctx, events, srv.handleDBEvent)
 	return srv, nil
 }
-
 func (server *Server) FindGameById(gameId uuid.UUID) (*game.Game, bool) {
 	g, exists := server.activeGames[gameId]
 	return g, exists
@@ -116,17 +127,10 @@ func (server *Server) FindGameByPlayerId(playerId string) (*game.Game, bool) {
 	}
 	return nil, false
 }
-
-func (server *Server) AddGame(g *game.Game) {
-	server.activeGames[g.GameId] = g
-}
-
-func (server *Server) AddPlayerIdToGame(playerId string, g *game.Game) {
-	server.playerSessions[playerId] = g.GameId
-}
-func (s *Server) Run(ctx context.Context, addr string) error {
+func (s *Server) Run(ctx context.Context) error {
+	port := fmt.Sprintf(":%s", s.serverConfig.Port)
 	s.httpServer = &http.Server{
-		Addr:    addr,
+		Addr:    port,
 		Handler: s.Mux,
 	}
 
@@ -143,7 +147,7 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 		}
 	}()
 
-	log.Printf("[SERVER] Running at http://localhost%s\n", addr)
+	log.Printf("[SERVER] Running at http://localhost%s\n", port)
 
 	err := s.httpServer.ListenAndServe()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -152,4 +156,14 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 
 	log.Println("[SERVER] Server stopped")
 	return nil
+}
+func (server *Server) buildServerHost() string {
+	return fmt.Sprintf("%s:%s", server.serverConfig.Host, server.serverConfig.Port)
+}
+func (server *Server) BuildGamePageURL(r *http.Request, host string, gameID uuid.UUID) string {
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s/game.html?gameId=%s", scheme, host, gameID.String())
 }

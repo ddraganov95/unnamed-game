@@ -8,13 +8,15 @@ const (
 	EventTypeKey EventType = iota
 	EventTypeConnect
 	EventTypeDisconnect
-	EventTypeMassDisconnect
-	EventTypeIdleCheck
+	EventTypeGameDestroy
+	EventTypePlayerQuit
+	EventTypeDeactivateGame
 	EventTypeCopyGame
 	EventTypeGlobalChatMsg
 	EventTypeGameChatMsg
 	EventTypeAchievementUnlocked
 	EventTypeGetNextLevel
+	EventTypeLevelCompleted
 )
 
 type GameEvent struct {
@@ -48,8 +50,14 @@ EventLoop:
 			case EventTypeDisconnect:
 				log.Printf("[DEBUG] Disco %s ", event.PlayerID)
 				game.HandlePlayerDisconnect(event.PlayerID)
+			case EventTypePlayerQuit:
+				log.Printf("[DEBUG] Player %s quit", event.PlayerID)
+				game.HandlePlayerDisconnect(event.PlayerID)
+				if len(game.GetActivePlayers()) == 0 {
+					log.Printf("[DEBUG] Game destroy")
+					game.Destroy(DestroyReasonPlayerQuit.String())
+				}
 			case EventTypeKey:
-				//log.Printf("[DEBUG] Reading Input %s %v", event.PlayerID, event.Key)
 				if receiver, ok := game.GetActivePlayerById(event.PlayerID); ok {
 					receiver.EnqueueKey(event.Key)
 					receiver.AFKMinutes = 0

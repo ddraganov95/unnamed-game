@@ -35,6 +35,9 @@ type DBConfig struct {
 	MaxOpenConn    int32         `json:"max_open_conn"`
 	MinIdleConn    int32         `json:"min_idle_conn"`
 }
+type copyExecutor interface {
+	CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error)
+}
 
 func NewDatabase() (*Database, error) {
 	config := LoadConfig()
@@ -102,19 +105,19 @@ func InitSchema(ctx context.Context, pool *pgxpool.Pool) error {
 }
 func LoadConfig() DBConfig {
 	return DBConfig{
-		Host:           getEnv("DB_HOST", "localhost"),
-		Port:           getEnv("DB_PORT", "5432"),
-		User:           getEnv("DB_USER", "dungeon_admin"),
-		Password:       getEnv("DB_PASSWORD", "secretpassword123"),
-		DBName:         getEnv("DB_NAME", "terminal_dungeon"),
-		SSLMode:        getEnv("DB_SSLMODE", "disable"),
+		Host:           GetEnv("DB_HOST", "localhost"),
+		Port:           GetEnv("DB_PORT", "5432"),
+		User:           GetEnv("DB_USER", "dungeon_admin"),
+		Password:       GetEnv("DB_PASSWORD", "secretpassword123"),
+		DBName:         GetEnv("DB_NAME", "terminal_dungeon"),
+		SSLMode:        GetEnv("DB_SSLMODE", "disable"),
 		MaxOpenConn:    25,
 		MinIdleConn:    10,
 		MaxConnLifeMin: 5 * time.Minute,
 	}
 }
 
-func getEnv(key, fallback string) string {
+func GetEnv(key, fallback string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
 	}

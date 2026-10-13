@@ -54,9 +54,9 @@ func (server *Server) RegisterPlayer(g *game.Game, playerID string, conn *GameWS
 		return err
 	}
 
-	server.mu.RLock()
+	server.mu.Lock()
 	server.activeConns[playerID] = conn
-	server.mu.RUnlock()
+	server.mu.Unlock()
 	return nil
 }
 
@@ -109,20 +109,20 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 		switch event.Type {
 		case game.EventTypeDisconnect:
 			server.handlePlayerDisconnectEvent(g, event.PlayerID)
-
-		case game.EventTypeMassDisconnect:
+		case game.EventTypeGameDestroy:
 			playersToDisconnect := make([]*game.Player, len(g.Players))
 			copy(playersToDisconnect, g.Players)
 			for _, p := range playersToDisconnect {
 				server.handlePlayerDisconnectEvent(g, p.PlayerID)
 			}
-
-		case game.EventTypeIdleCheck:
+			err := server.handleGameFinalization(g, event.Value)
+			log.Printf("Game ending with status %s", event.Value)
+			event.RespChan <- err
+		case game.EventTypeDeactivateGame:
 			server.mu.Lock()
 			delete(server.activeGames, g.GameId)
 			server.mu.Unlock()
 			return
-
 		case game.EventTypeCopyGame:
 			server.mu.Lock()
 			if connection, exists := server.activeConns[event.PlayerID]; exists {
@@ -130,8 +130,8 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 					Type:    "copy_clipboard",
 					Payload: event.Value,
 				})
-				server.mu.Unlock()
 			}
+			server.mu.Unlock()
 		case game.EventTypeAchievementUnlocked:
 			userID, exists := server.playerUsers[event.PlayerID]
 			if !exists {
@@ -153,7 +153,8 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 					g.GameChat <- payload.Message
 				}
 			}
-
+		case game.EventTypeLevelCompleted:
+			server.processAndSaveEvents(g, event)
 		case game.EventTypeGlobalChatMsg:
 			connection, exists := server.activeConns[event.PlayerID]
 			if !exists {
@@ -228,4 +229,48 @@ func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn
 		Type:     game.EventTypeDisconnect,
 		PlayerID: playerID,
 	}
+}
+func (s *Server) processAndSaveEvents(g *game.Game, event game.ServerEvent) {
+	events, ok := event.Object.([]game.Event)
+	if !ok {
+		log.Printf("[ERROR] Type assertion failed: event.Object is not []game.Event for game %v", g.GameId)
+		return
+	}
+	if len(events) == 0 {
+		return
+	}
+
+	//Call DB async
+	s.runAsync("save game events", g.GameId, func(ctx context.Context) error {
+		return s.db.SaveGameEventsCopy(ctx, g.GameId, events)
+	})
+}
+func (s *Server) runAsync(taskName string, gameID uuid.UUID, dbOp func(ctx context.Context) error) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := dbOp(ctx); err != nil {
+			log.Printf("[ERROR] Failed to %s for game %s: %v", taskName, gameID, err)
+			return
+		}
+		log.Printf("[DB] Successfully completed %s for game %s", taskName, gameID)
+	}()
+}
+func (s *Server) handleGameFinalization(g *game.Game, status string) error {
+	gameID := g.GameId
+	summary := g.GenerateSummary()
+	events := g.ExtractLogsToSave()
+
+	// Enforce a strict 5-second timeout for the final write
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := s.db.EndGameWithEvents(ctx, gameID, status, summary, events); err != nil {
+		log.Printf("[ERROR] Failed to finalize game %s in DB: %v", gameID, err)
+		return err
+	}
+
+	log.Printf("[DB] Successfully finalized and persisted game %s (%s)", gameID, status)
+	return nil
 }

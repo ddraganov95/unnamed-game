@@ -281,7 +281,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 const data = await res.json();
-                window.location.href = `/game.html?gameId=${encodeURIComponent(data.game_id)}`;
+               window.location.href = data.redirect_url;
             } catch (err) {
                 if (errorLabel) errorLabel.textContent = "Server error while creating game.";
             }
@@ -307,7 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 const data = await response.json();
-                window.location.href = `/game.html?gameId=${encodeURIComponent(data.game_id)}`;
+                window.location.href = data.redirect_url;
             } catch (err) {
                 if (errorLabel) errorLabel.textContent = "Failed to join game.";
             }

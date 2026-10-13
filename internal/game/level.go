@@ -44,9 +44,8 @@ func NewLevel(game *Game) {
 	level.InitializeZoneObjects()
 	level.InitializeSpawnPoints()
 
-	game.Events = nil
 	game.Level = level
-	game.LevelNumber++
+	game.TotalLevels++
 
 	for _, player := range game.GetActivePlayers() {
 		if !player.IsAlive() {
@@ -58,7 +57,7 @@ func NewLevel(game *Game) {
 
 	fmt.Println("Players Spawned...")
 	rules := GetSpawnRulesForLevel(game.GetAveragePlayerLevel())
-	level.SpawnEnemies(rules)
+	game.SpawnEnemies(rules)
 	fmt.Println("Finished level gen...")
 }
 
@@ -99,12 +98,17 @@ func (level *Level) Update(game *Game) {
 		for _, player := range game.GetActivePlayers() {
 			player.LevelsCompleted++
 		}
+		game.LevelsCompleted++
 		elapsedSeconds := int64(time.Since(level.CreatedAt).Seconds())
 		game.AchievementEngine.PublishEvent(AchievementEvent{
 			PlayerIDs: game.GetActiveAndAlivePlayerID(),
 			Key:       "TIME:level_speedrun",
 			Amount:    elapsedSeconds,
 		})
+		game.ServerEventChan <- ServerEvent{
+			Type:   EventTypeLevelCompleted,
+			Object: game.ExtractLogsToSave(),
+		}
 		game.State = StateGameIntermission
 	}
 }
@@ -205,8 +209,8 @@ func (level *Level) GenerateLine(startX, startY, dx, dy, length int, create func
 	}
 }
 
-func (level *Level) SpawnEnemies(rules []SpawnRule) {
-	availablePositions := level.EnemySpawnPoints
+func (game *Game) SpawnEnemies(rules []SpawnRule) {
+	availablePositions := game.Level.EnemySpawnPoints
 
 	rand.Shuffle(len(availablePositions), func(i, j int) {
 		availablePositions[i], availablePositions[j] = availablePositions[j], availablePositions[i]
@@ -218,11 +222,11 @@ func (level *Level) SpawnEnemies(rules []SpawnRule) {
 		for posIndex < len(availablePositions) && spawned < rule.Count {
 			pos := availablePositions[posIndex]
 			posIndex++
-			if _, taken := level.GetEntityAt(pos); !taken {
+			if _, taken := game.Level.GetEntityAt(pos); !taken {
 				id := fmt.Sprintf("%s %d", rule.EnemyType.String(), spawned+1)
 				enemy := CreateEnemy(id, pos, rule.EnemyType)
 				log.Printf("add enemy")
-				level.AddEnemy(enemy)
+				game.AddEnemy(enemy)
 				spawned++
 			}
 		}

@@ -41,18 +41,6 @@ const (
 	StateTypingGlobalChat
 )
 
-func (s PlayerState) String() string {
-	switch s {
-	case StatePlaying:
-		return "Playing"
-	case StateTyping:
-		return "Typing"
-	case StateDisconnected:
-		return "Disconnected"
-	default:
-		return "Unknown"
-	}
-}
 func (player *Player) MoveUp(game *Game) {
 	if !player.IsAlive() {
 		return
@@ -212,6 +200,7 @@ func (player *Player) CheckDeath(game *Game) {
 		player.CurrentHealth = 0
 		game.CreateLog("%s %s Died to %s", LogSuccess, player.GetID(), killer)
 		game.Level.RemoveEntity(player)
+		game.PlayerDeaths++
 	}
 }
 func (player *Player) GetDamageMultiplierPercent() int {
@@ -313,7 +302,7 @@ func (player *Player) QuitGame(game *Game) {
 		Amount:    0,
 	})
 	game.EventChan <- GameEvent{
-		Type:     EventTypeDisconnect,
+		Type:     EventTypePlayerQuit,
 		PlayerID: player.GetID(),
 	}
 	game.CreateLog("Quitting Game...")

@@ -10,6 +10,7 @@ import (
 )
 
 type Game struct {
+	GameSummary
 	Mu                sync.RWMutex
 	Events            []Event
 	Frame             [][]rune
@@ -24,7 +25,6 @@ type Game struct {
 	GameId            uuid.UUID
 	Level             *Level
 	EmptyMinutes      int
-	LevelNumber       int
 	State             GameState
 }
 type GameState int
@@ -137,11 +137,9 @@ func (game *Game) StartGame() {
 }
 
 func (game *Game) UpdateGame() {
-	//log.Printf("There are %d projectiles in the level", len(game.Level.Projectiles))
 	for _, proj := range game.Level.Projectiles {
 		proj.Update(game)
 	}
-	//log.Printf("There are %d enemies in the level", len(game.Level.Enemies))
 	for _, enemy := range game.Level.Enemies {
 		UpdateEnemy(game, enemy)
 	}
@@ -187,7 +185,7 @@ func (game *Game) HandleEmptyGame() {
 				if game.EmptyMinutes >= StopGameAfterIdleMinutes {
 					log.Println("[DEBUG] Idle threshold reached via ticker. Shutting down game.")
 					game.Mu.Unlock()
-					game.Destroy()
+					game.Destroy(DestroyReasonIdleCheck.String())
 					return
 				}
 			} else {
@@ -198,7 +196,25 @@ func (game *Game) HandleEmptyGame() {
 	}
 }
 
-func (game *Game) Destroy() {
+type DestroyReason int
+
+const (
+	DestroyReasonIdleCheck DestroyReason = iota
+	DestroyReasonPlayerQuit
+)
+
+func (dr DestroyReason) String() string {
+	switch dr {
+	case DestroyReasonIdleCheck:
+		return "idle_check"
+	case DestroyReasonPlayerQuit:
+		return "player_quit"
+	default:
+		return "unknown"
+	}
+}
+
+func (game *Game) Destroy(reason string) {
 	select {
 	case <-game.DestroyChan:
 		return // Already destroyed, exit safely
@@ -207,16 +223,17 @@ func (game *Game) Destroy() {
 	}
 	dcChan := make(chan error)
 	game.ServerEventChan <- ServerEvent{
-		Type:     EventTypeMassDisconnect,
+		Type:     EventTypeGameDestroy,
+		Value:    reason,
 		RespChan: dcChan,
 	}
 	select {
 	case <-dcChan:
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		log.Println("[ERROR] Timeout waiting for mass disconnect response")
 	}
 
-	game.ServerEventChan <- ServerEvent{Type: EventTypeIdleCheck}
+	game.ServerEventChan <- ServerEvent{Type: EventTypeDeactivateGame}
 	log.Println("[DEBUG] Game instance successfully destroyed and idle check sent.")
 }
 
@@ -252,7 +269,7 @@ func (game *Game) HandlePlayerConnect(event GameEvent) error {
 	log.Println("[DEBUG] Player Connecting")
 	if player, exists := game.GetPlayerByID(event.PlayerID); exists {
 		log.Println("[DEBUG] Existing Player Connecting")
-		if game.LevelNumber-1 == player.LevelsCompleted {
+		if game.LevelsCompleted == player.LevelsCompleted {
 			if !game.Level.PutEntityAtPosition(player, player.GetPosition()) {
 				log.Printf("[DEBUG] Old position blocked for %s, falling back to spawn", event.PlayerID)
 				game.SpawnPlayer(player)
@@ -489,7 +506,7 @@ func (game *Game) DrawPlayerHUD(player *Player) {
 		return
 	}
 	hudText := fmt.Sprintf(" %c%d | %c%v | %c%d/%d | %c%d | %c%d |%c%d",
-		SymbolHitPoints, player.CurrentHealth, SymbolCurrentAttack, player.GetEquippedAttack().String(), SymbolCurrentExperience, player.ExperienceVal, player.NextLevelXP, SymbolCurrentLevel, player.Level, SymbolCurrentGameLevel, game.LevelNumber, SymbolScore, player.Score)
+		SymbolHitPoints, player.CurrentHealth, SymbolCurrentAttack, player.GetEquippedAttack().String(), SymbolCurrentExperience, player.ExperienceVal, player.NextLevelXP, SymbolCurrentLevel, player.Level, SymbolCurrentGameLevel, game.TotalLevels, SymbolScore, player.Score)
 	gameStartCol := MaxMessageLength + 3
 	for col, ch := range hudText {
 		targetCol := gameStartCol + col

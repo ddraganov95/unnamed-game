@@ -426,7 +426,7 @@ func (enemy *Enemy) CheckDeath(game *Game) {
 			Key:       fmt.Sprintf("kill:%s", enemy.EnemyType), // Produces "KILL:goblin", "KILL:archer", etc.
 			Amount:    1,
 		})
-
+		game.EnemiesKilled++
 		enemy.DistributeXp(game)
 		game.CreateLog("Trying to remove enemy %s", enemy.GetID())
 		game.Level.RemoveEnemy(enemy)

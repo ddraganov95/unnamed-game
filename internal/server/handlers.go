@@ -48,9 +48,6 @@ func (server *Server) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	server.mu.Lock()
-	defer server.mu.Unlock()
-
 	targetGameID := uuid.NewV7()
 	targetGame := game.NewGame(targetGameID, server.globalChat, server.achievementCat)
 
@@ -59,22 +56,29 @@ func (server *Server) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	server.AddGame(targetGame)
-	go server.listenToGameEvents(targetGame)
+	if err := server.db.InsertNewGame(r.Context(), targetGameID, server.buildServerHost()); err != nil {
+		log.Printf("[DB] Failed to create game: %v", err)
+		http.Error(w, "Failed to create game", http.StatusInternalServerError)
+		return
+	}
 	log.Println("NEW GAME CREATED")
-
-	server.AddPlayerIdToGame(playerID, targetGame)
-	log.Printf("added %s to game: %s", playerID, targetGame.GameId)
-
 	// Add joining player's achievement progress in this room
 	progress, err := server.db.FetchPlayerProgress(r.Context(), userID)
 	if err == nil {
 		targetGame.AchievementEngine.LoadPlayerAchievements(playerID, progress)
 	}
+	server.mu.Lock()
+	server.activeGames[targetGame.GameId] = targetGame
+	server.playerSessions[playerID] = targetGame.GameId
+	server.mu.Unlock()
+	log.Printf("added %s to game: %s", playerID, targetGame.GameId)
+
+	go server.listenToGameEvents(targetGame)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(GameResponse{
-		GameID: targetGameID.String(),
+		GameID:      targetGameID.String(),
+		RedirectURL: server.BuildGamePageURL(r, server.buildServerHost(), targetGameID),
 	})
 }
 
@@ -103,11 +107,25 @@ func (server *Server) HandleJoinGame(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid game ID format", http.StatusBadRequest)
 		return
 	}
+	host, err := server.db.FetchGameHostByGameId(r.Context(), parsedID)
+	if err != nil {
+		http.Error(w, "Game not found", http.StatusNotFound)
+		return
+	}
+	localHost := server.buildServerHost()
+	if localHost != host {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(GameResponse{
+			GameID:      parsedID.String(),
+			RedirectURL: server.BuildGamePageURL(r, host, parsedID),
+		})
+		return
+	}
 
-	server.mu.Lock()
-	defer server.mu.Unlock()
-
+	server.mu.RLock()
 	targetGame, exists := server.activeGames[parsedID]
+	server.mu.RUnlock()
+
 	if !exists {
 		http.Error(w, "Game session not found", http.StatusNotFound)
 		return
@@ -118,17 +136,20 @@ func (server *Server) HandleJoinGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	server.AddPlayerIdToGame(playerID, targetGame)
-
 	// Add joining player's achievement progress in this room
 	progress, err := server.db.FetchPlayerProgress(r.Context(), userID)
 	if err == nil {
 		targetGame.AchievementEngine.LoadPlayerAchievements(playerID, progress)
 	}
 
+	server.mu.Lock()
+	server.playerSessions[playerID] = targetGame.GameId
+	server.mu.Unlock()
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(GameResponse{
-		GameID: parsedID.String(),
+		GameID:      parsedID.String(),
+		RedirectURL: server.BuildGamePageURL(r, host, targetGame.GameId),
 	})
 }
 
@@ -138,13 +159,15 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	server.lobbyMu.Lock()
-	server.playerUsers[playerID], err = uuid.Parse(userID)
-	server.lobbyMu.Unlock()
+
+	parsedUserID, err := uuid.Parse(userID)
 	if err != nil {
 		http.Error(w, "Invalid user ID format in session", http.StatusUnauthorized)
 		return
 	}
+	server.lobbyMu.Lock()
+	server.playerUsers[playerID] = parsedUserID
+	server.lobbyMu.Unlock()
 	g, ok := server.FindGameByPlayerId(playerID)
 	if !ok {
 		log.Printf("[ERROR] Cannot find game for %s", playerID)
@@ -245,7 +268,7 @@ func (server *Server) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	var req GameRequest
+	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PlayerID == "" {
 		http.Error(w, "Invalid request payload or missing player_id", http.StatusBadRequest)
 		return
@@ -272,7 +295,7 @@ func (server *Server) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 	})
 
 	json.NewEncoder(w).Encode(map[string]string{
-		"status":   "ok", // <------
+		"status":   "ok",
 		"redirect": "/lobby.html",
 	})
 }
@@ -286,26 +309,23 @@ func (server *Server) HandleGetSelf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := server.db.FetchUserSummary(r.Context(), userID)
+	userSummary, err := server.db.FetchUserSummary(r.Context(), userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if err := json.NewEncoder(w).Encode(user); err != nil {
+	if err := json.NewEncoder(w).Encode(userSummary); err != nil {
 		http.Error(w, "Failed to encode user data", http.StatusInternalServerError)
 		return
 	}
-	server.mu.Lock()
-	server.playerUsers[playerID] = user.UserID
-	server.mu.Unlock()
-	log.Printf("[DB] Successfully saved %s player with UUID %s", playerID, user.UserID)
+	log.Printf("[DB] Successfully saved %s player with UUID %s", playerID, userSummary.UserID)
 }
 
 func (server *Server) HandleGetSelfAchievements(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	userIDStr, playerID, err := ExtractSessionIDs(r)
+	userIDStr, _, err := ExtractSessionIDs(r)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -328,9 +348,6 @@ func (server *Server) HandleGetSelfAchievements(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	server.mu.Lock()
-	server.playerUsers[playerID] = userID
-	server.mu.Unlock()
 	log.Printf("[DB] Successfully fetched achievements for player with UUID %s", userID.String())
 }
 
@@ -343,7 +360,7 @@ type SelfLeaderboardReponse struct {
 func (server *Server) HandleGetSelfLeaderboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	userIDStr, playerID, err := ExtractSessionIDs(r)
+	userIDStr, _, err := ExtractSessionIDs(r)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -393,10 +410,6 @@ func (server *Server) HandleGetSelfLeaderboard(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Failed to encode leaderboard data", http.StatusInternalServerError)
 		return
 	}
-
-	server.mu.Lock()
-	server.playerUsers[playerID] = userID
-	server.mu.Unlock()
 	log.Printf("[DB] Successfully fetched leaderboard for player with UUID %s", userID.String())
 }
 func getCurrentUserFromPage(userID uuid.UUID, usersOnLeaderboard []db.UserLeaderboardView) (db.UserLeaderboardView, error) {
@@ -501,9 +514,6 @@ func (server *Server) HandleGetSelfConfig(w http.ResponseWriter, r *http.Request
 		log.Printf("Error fetching config: %s", err)
 	}
 
-	server.mu.Lock()
-	server.playerUsers[playerID] = userID
-	server.mu.Unlock()
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(userConfig)
 }
@@ -559,10 +569,6 @@ func (server *Server) HandleUpdateSelfConfig(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		log.Printf("Error fetching config: %s", err)
 	}
-
-	server.mu.Lock()
-	server.playerUsers[playerID] = userID
-	server.mu.Unlock()
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(userConfig)
 }

@@ -45,7 +45,7 @@ func main() {
 	fmt.Println("Hello To Unnamed RPG Game Server")
 
 	//Run hands over control and blocks until Ctrl+C triggers graceful exit
-	if err := srv.Run(ctx, ":8080"); err != nil {
+	if err := srv.Run(ctx); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
 

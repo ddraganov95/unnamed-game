@@ -1,10 +1,25 @@
 package game
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type Event struct {
-	Runes []rune
-	Text  string
+	Runes     []rune
+	Text      string
+	CreatedAt time.Time
+	Type      GameplayEventType
+}
+type GameplayEventType int
+
+const (
+	GameplayEventTypeDefault GameplayEventType = iota
+)
+
+func (t GameplayEventType) String() string {
+	return "undefined"
+
 }
 
 func (game *Game) CreateLog(format string, args ...any) {
@@ -14,11 +29,21 @@ func (game *Game) CreateLog(format string, args ...any) {
 		runes = runes[:MaxMessageLength]
 	}
 	game.Events = append(game.Events, Event{
-		Text:  text,
-		Runes: []rune(text),
+		Text:      text,
+		Runes:     []rune(text),
+		CreatedAt: time.Now(),
 	})
 }
+func (game *Game) ExtractLogsToSave() []Event {
+	if len(game.Events) == 0 {
+		return nil
+	}
 
+	logs := game.Events
+	game.Events = nil
+
+	return logs
+}
 func (game *Game) GetEventRuneAt(eventIndex int, messageIndex int) rune {
 	totalEvents := len(game.Events)
 
