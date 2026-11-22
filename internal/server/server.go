@@ -16,6 +16,16 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const (
+	DBWriteQueueSize = 256
+	DBWriteTimeout   = 5 * time.Second
+)
+
+type dbWriteTask struct {
+	name string
+	run  func(context.Context) error
+}
+
 type Server struct {
 	mu             sync.RWMutex
 	lobbyMu        sync.Mutex
@@ -32,6 +42,7 @@ type Server struct {
 	Mux            *http.ServeMux
 	httpServer     *http.Server
 	globalChat     chan string
+	dbWriteChan    chan dbWriteTask
 }
 type ServerConfig struct {
 	Host string `json:"host"`
@@ -106,11 +117,13 @@ func NewServer(ctx context.Context) (*Server, error) {
 		lobbyConns:     make(map[string]*ChatWSConnection),
 		playerUsers:    make(map[string]uuid.UUID),
 		globalChat:     make(chan string, game.MaxChatHistory),
+		dbWriteChan:    make(chan dbWriteTask, DBWriteQueueSize),
 		Mux:            http.NewServeMux(),
 		db:             database,
 		achievementCat: catalog,
 		serverConfig:   NewConfig(),
 	}
+	go srv.dbWriteWorker(ctx)
 	game.InitGameRegistries()
 	events := []string{"achievement_unlocked", "global_chat"}
 	go database.ListenToDBEvents(ctx, events, srv.handleDBEvent)
@@ -166,4 +179,29 @@ func (server *Server) BuildGamePageURL(r *http.Request, host string, gameID uuid
 		scheme = "https"
 	}
 	return fmt.Sprintf("%s://%s/game.html?gameId=%s", scheme, host, gameID.String())
+}
+
+func (server *Server) dbWriteWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case task := <-server.dbWriteChan:
+			writeCtx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
+			err := task.run(writeCtx)
+			cancel()
+
+			if err != nil {
+				log.Printf("[DB WRITE] %s failed: %v", task.name, err)
+			}
+		}
+	}
+}
+
+func (server *Server) enqueueDBWrite(name string, run func(context.Context) error) {
+	select {
+	case server.dbWriteChan <- dbWriteTask{name: name, run: run}:
+	default:
+		log.Printf("[DB WRITE] queue full, dropping %s", name)
+	}
 }

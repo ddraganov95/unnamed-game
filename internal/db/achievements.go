@@ -10,7 +10,9 @@ import (
 )
 
 func (db *Database) FetchAchievementCatalog(ctx context.Context) ([]game.AchCatalogDTO, error) {
-	rows, err := db.pool.Query(ctx, GetAchievementCatalog)
+	const query = `SELECT achievement_id, code, title, description, requirements, is_global_announcement FROM achievements;`
+
+	rows, err := db.pool.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch achievements: %w", err)
 	}
@@ -47,7 +49,21 @@ func (db *Database) FetchAchievementCatalog(ctx context.Context) ([]game.AchCata
 	return catalog, rows.Err()
 }
 func (db *Database) FetchPlayerProgress(ctx context.Context, userID uuid.UUID) ([]game.AchProgressDTO, error) {
-	rows, err := db.pool.Query(ctx, GetPlayerFullAchievementState, userID)
+	const query = `
+    SELECT 
+        a.achievement_id,
+        a.code,
+        a.requirements,
+        CASE WHEN pa.achievement_id IS NOT NULL THEN true ELSE false END AS is_unlocked,
+        COALESCE(pap.current_progress, '{}'::jsonb) AS progress
+    FROM achievements a
+    LEFT JOIN player_achievements pa 
+        ON a.achievement_id = pa.achievement_id AND pa.user_id = $1
+    LEFT JOIN player_achievements_progress pap 
+        ON a.achievement_id = pap.achievement_id AND pap.user_id = $1;
+`
+
+	rows, err := db.pool.Query(ctx, query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch player achievement state: %w", err)
 	}
