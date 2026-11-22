@@ -108,6 +108,7 @@ const (
 // Game Constants
 const (
 	InputBufferPerPlayer     = 10
+	ServerEventBufferLength  = 50
 	StopGameAfterIdleMinutes = 3
 	PlayerAllowedAFKMins     = 2
 	MaxPlayerLevel           = 100

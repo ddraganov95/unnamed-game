@@ -165,9 +165,9 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid user ID format in session", http.StatusUnauthorized)
 		return
 	}
-	server.lobbyMu.Lock()
+	server.mu.Lock()
 	server.playerUsers[playerID] = parsedUserID
-	server.lobbyMu.Unlock()
+	server.mu.Unlock()
 	g, ok := server.FindGameByPlayerId(playerID)
 	if !ok {
 		log.Printf("[ERROR] Cannot find game for %s", playerID)
@@ -255,7 +255,7 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 		}
 
 		if len(msg) > 0 {
-			server.SendGlobalChatToDB(r.Context(), playerID, string(msg))
+			server.SendGlobalChatToDB(playerID, string(msg))
 		}
 	}
 }

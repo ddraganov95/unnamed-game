@@ -18,15 +18,27 @@ type Game struct {
 }
 
 func (db *Database) InsertNewGame(ctx context.Context, gameID uuid.UUID, serverHost string) error {
-	_, err := db.pool.Exec(ctx, InsertGame, gameID, serverHost, "active")
+	const query = `
+INSERT INTO games(game_id,server_host,status)
+VALUES($1, $2, $3)
+ON CONFLICT DO NOTHING;
+`
+
+	_, err := db.pool.Exec(ctx, query, gameID, serverHost, "active")
 	if err != nil {
 		return err
 	}
 	return nil
 }
 func (db *Database) FetchGameHostByGameId(ctx context.Context, gameID uuid.UUID) (string, error) {
+	const query = `
+SELECT server_host 
+FROM games 
+WHERE game_id = $1
+`
+
 	var serverHost string
-	err := db.pool.QueryRow(ctx, FindGameHostById, gameID).Scan(&serverHost)
+	err := db.pool.QueryRow(ctx, query, gameID).Scan(&serverHost)
 	if err != nil {
 		return "", err
 	}

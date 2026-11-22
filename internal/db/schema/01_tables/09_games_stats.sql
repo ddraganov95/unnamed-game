@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS games_stats (
     enemies_spawned    INT DEFAULT 0,
     enemies_killed     INT DEFAULT 0,
     empty_minutes      INT DEFAULT 0,
-    duration_seconds   INT DEFAULT 0,
-    ended_at           TIMESTAMPTZ DEFAULT NOW(),
-    termination_reason VARCHAR(20)
+    duration_seconds   INT DEFAULT 0
 );
+
+ALTER TABLE games_stats DROP COLUMN IF EXISTS ended_at;
+ALTER TABLE games_stats DROP COLUMN IF EXISTS termination_reason;

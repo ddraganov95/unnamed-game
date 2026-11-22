@@ -47,9 +47,15 @@ func GetActionLabel(action string) string {
 }
 
 func (db *Database) FetchUserConfiguration(ctx context.Context, userID uuid.UUID) (UserConfiguration, error) {
+	const query = `
+SELECT config
+FROM user_configuration
+WHERE user_id = $1
+`
+
 	var rawBytes []byte
 
-	err := db.pool.QueryRow(ctx, GetUserConfiguration, userID).Scan(&rawBytes)
+	err := db.pool.QueryRow(ctx, query, userID).Scan(&rawBytes)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DefaultUserConfiguration, nil
@@ -65,12 +71,19 @@ func (db *Database) FetchUserConfiguration(ctx context.Context, userID uuid.UUID
 	return config, nil
 }
 func (db *Database) UpsertUserConfiguration(ctx context.Context, userID uuid.UUID, config UserConfiguration) error {
+	const query = `
+INSERT INTO user_configuration (user_id, config)
+VALUES ($1, $2)
+ON CONFLICT (user_id) DO UPDATE
+SET config = EXCLUDED.config;
+`
+
 	configBytes, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal user config: %w", err)
 	}
 
-	_, err = db.pool.Exec(ctx, UpsertUserConfig, userID, configBytes)
+	_, err = db.pool.Exec(ctx, query, userID, configBytes)
 	if err != nil {
 		return fmt.Errorf("failed to upsert user config: %w", err)
 	}

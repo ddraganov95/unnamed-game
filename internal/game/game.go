@@ -81,7 +81,7 @@ func InitEventChan(game *Game) {
 	evntChan := make(chan GameEvent, InputBufferPerPlayer*MaxPlayerCount)
 	game.EventChan = evntChan
 
-	serverEvntChan := make(chan ServerEvent, MaxPlayerCount)
+	serverEvntChan := make(chan ServerEvent, ServerEventBufferLength)
 	game.ServerEventChan = serverEvntChan
 }
 

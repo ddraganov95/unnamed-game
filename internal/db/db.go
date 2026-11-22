@@ -139,23 +139,6 @@ func (c DBConfig) ConnString() string {
 	return u.String()
 }
 
-// CallProcedure executes any PostgreSQL stored procedure with variadic arguments using pgx pool.
-func (db *Database) CallProcedure(ctx context.Context, name string, args ...any) error {
-	placeholders := make([]string, len(args))
-	for i := range args {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
-	}
-
-	query := fmt.Sprintf("CALL %s(%s);", name, strings.Join(placeholders, ", "))
-
-	// Use db.Pool.Exec (pgx standard) instead of ExecContext
-	_, err := db.pool.Exec(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("procedure call failed (%s): %w", name, err)
-	}
-
-	return nil
-}
 func (db *Database) QueryOne[T any](ctx context.Context, name string, args ...any) (T, error) {
 	var result T
 	placeholders := make([]string, len(args))

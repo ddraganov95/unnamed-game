@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"time"
 	"uuid"
 
 	"unnamed-game/internal/game"
@@ -133,7 +132,9 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			}
 			server.mu.Unlock()
 		case game.EventTypeAchievementUnlocked:
+			server.mu.RLock()
 			userID, exists := server.playerUsers[event.PlayerID]
+			server.mu.RUnlock()
 			if !exists {
 				log.Printf("[ACHIEVEMENT ERROR] Could not map PlayerID '%s' to DB userID", event.PlayerID)
 				break
@@ -141,8 +142,12 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 
 			log.Printf("[ACHIEVEMENT DB] Triggering unlock for User: %s | Ach: %v", userID, event.Value)
 
-			//ALWAYS capture and log the error returned by CallProcedure
-			if err := server.db.CallFunction(context.Background(), "player_achievement_unlock", userID, event.Value); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
+			err := server.db.CallFunction(ctx, "player_achievement_unlock", userID, event.Value)
+			cancel()
+
+			//ALWAYS capture and log the error returned by CallFunction
+			if err != nil {
 				log.Printf("[ACHIEVEMENT DB ERROR] Failed to unlock achievement for user %s: %v", userID, err)
 			} else {
 				log.Printf("[ACHIEVEMENT DB SUCCESS] Successfully persisted unlock for user %s", userID)
@@ -156,12 +161,14 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 		case game.EventTypeLevelCompleted:
 			server.processAndSaveEvents(g, event)
 		case game.EventTypeGlobalChatMsg:
-			connection, exists := server.activeConns[event.PlayerID]
+			server.mu.RLock()
+			_, exists := server.activeConns[event.PlayerID]
+			server.mu.RUnlock()
 			if !exists {
 				log.Printf("[SERVER ERROR] No connection found for player %s", event.PlayerID)
 				continue
 			}
-			server.SendGlobalChatToDB(connection.Ctx, event.PlayerID, event.Value)
+			server.SendGlobalChatToDB(event.PlayerID, event.Value)
 		case game.EventTypeGameChatMsg:
 			g.BroadcastGameChat(event.PlayerID, event.Value)
 		default:
@@ -177,7 +184,9 @@ func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string)
 		log.Printf("[WARN] No active connection found for player %s on disconnect\n", playerID)
 		return
 	}
+	server.mu.RLock()
 	userID, ok := server.playerUsers[playerID]
+	server.mu.RUnlock()
 	if !ok {
 		log.Printf("[ERROR] No user ID found for player %s on disconnect\n", playerID)
 		return
@@ -196,7 +205,7 @@ func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string)
 	achievementProgress := g.AchievementEngine.ExportPlayerProgress(player.PlayerID)
 	log.Printf("[DISCONNECT DEBUG] PlayerID: '%s' maps to UserID: '%s'", playerID, userID)
 	log.Printf("[DISCONNECT DEBUG] Exported Achievement Progress payload type: %T, value: %+v", achievementProgress, achievementProgress)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
 	user_stats, err := server.db.UpdatePlayerAfterDisconnect(ctx, userID, player.GenerateSummary(), achievementProgress)
 	cancel()
 	achievementPayload := g.AchievementEngine.BuildClientAchievementPayload(player.PlayerID)
@@ -247,7 +256,7 @@ func (s *Server) processAndSaveEvents(g *game.Game, event game.ServerEvent) {
 }
 func (s *Server) runAsync(taskName string, gameID uuid.UUID, dbOp func(ctx context.Context) error) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
 		defer cancel()
 
 		if err := dbOp(ctx); err != nil {
@@ -262,8 +271,8 @@ func (s *Server) handleGameFinalization(g *game.Game, status string) error {
 	summary := g.GenerateSummary()
 	events := g.ExtractLogsToSave()
 
-	// Enforce a strict 5-second timeout for the final write
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Enforce a strict timeout for the final write
+	ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
 	defer cancel()
 
 	if err := s.db.EndGameWithEvents(ctx, gameID, status, summary, events); err != nil {

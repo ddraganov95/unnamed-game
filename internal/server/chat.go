@@ -28,21 +28,20 @@ func (server *Server) BroadcastGlobalMessage(msg string) {
 	default:
 	}
 }
-func (server *Server) SendGlobalChatToDB(ctx context.Context, playerId string, message string) {
+func (server *Server) SendGlobalChatToDB(playerId string, message string) {
 	server.mu.RLock()
 	userId, exists := server.playerUsers[playerId]
 	server.mu.RUnlock()
 	if !exists {
-		log.Printf("[DEBUG] PlayerID: %s could not be matched to UserID. Message: %s not sent", userId, message)
+		log.Printf("[DEBUG] PlayerID: %s could not be matched to UserID. Message: %s not sent", playerId, message)
 		return
 	}
 	msgBroadcasted := fmt.Sprintf("[%s]: %s", playerId, message)
 	log.Println(msgBroadcasted)
 
-	err := server.db.CallFunction(ctx, "global_chat_message_send", userId, message, msgBroadcasted)
-	if err != nil {
-		log.Printf("Mesage not sent. Reason: %s", err)
-	}
+	server.enqueueDBWrite("send global chat", func(ctx context.Context) error {
+		return server.db.CallFunction(ctx, "global_chat_message_send", userId, message, msgBroadcasted)
+	})
 }
 
 type AchievementNotificationPayload struct {
