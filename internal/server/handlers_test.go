@@ -396,11 +396,10 @@ func TestRejectedConnectSendsCloseReason(t *testing.T) {
 	}
 }
 
-// HandleCreateGame starts the game's goroutines (NewGame) before writing to
-// the DB. If the insert fails the game is dropped but its loop, idle ticker
-// and achievement processor keep running forever.
+// HandleCreateGame used to start the game's goroutines (NewGame) before
+// writing to the DB. If the insert failed the game was dropped but its loop,
+// idle ticker and achievement processor kept running forever.
 func TestCreateGameDBFailureDoesNotLeakGoroutines(t *testing.T) {
-	testutil.KnownBug(t, "HandleCreateGame leaks the game's goroutines when the DB insert fails")
 	env := newTestEnv(t)
 	c := env.newClient("alice")
 	var cookie *http.Cookie

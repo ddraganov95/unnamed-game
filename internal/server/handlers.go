@@ -49,7 +49,9 @@ func (server *Server) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetGameID := uuid.NewV7()
-	targetGame := game.NewGame(targetGameID, server.achievementCat)
+	// Not started yet: if anything below fails the game is just dropped,
+	// with no goroutines left running.
+	targetGame := game.CreateGame(targetGameID, server.achievementCat)
 
 	if err := targetGame.Validate(playerID); err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -67,13 +69,17 @@ func (server *Server) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		targetGame.AchievementEngine.LoadPlayerAchievements(playerID, progress)
 	}
+
+	// Setup succeeded: start the server listener and the game, then make it
+	// visible to joins and websocket connects.
+	go server.listenToGameEvents(targetGame)
+	targetGame.Start()
+
 	server.mu.Lock()
 	server.activeGames[targetGame.GameId] = targetGame
 	server.playerSessions[playerID] = targetGame.GameId
 	server.mu.Unlock()
 	log.Printf("added %s to game: %s", playerID, targetGame.GameId)
-
-	go server.listenToGameEvents(targetGame)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(GameResponse{

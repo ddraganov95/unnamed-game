@@ -69,14 +69,29 @@ func (game *Game) goSafe(fn func()) {
 		fn()
 	}()
 }
+// NewGame creates a game and starts its goroutines.
 func NewGame(gameId uuid.UUID, achievementCatalog *AchievementCatalog) *Game {
+	game := CreateGame(gameId, achievementCatalog)
+	game.Start()
+	return game
+}
+
+// CreateGame builds a game without starting any goroutines, so a caller can
+// do fallible setup (e.g. the DB insert) first and simply drop the game if
+// it fails. Call Start once the game is ready to run.
+func CreateGame(gameId uuid.UUID, achievementCatalog *AchievementCatalog) *Game {
 	game := InitializeGame()
 	game.GameId = gameId
 	game.AchievementEngine = NewAchievementEngine(achievementCatalog, game.DestroyChan, game.ServerEventChan)
+	return game
+}
+
+// Start launches the game loop, the idle ticker and the achievement
+// processor. They run until the game is destroyed. Call it once.
+func (game *Game) Start() {
 	game.goSafe(game.StartGame)                             // Start the game loop
 	game.goSafe(game.HandleEmptyGame)                       // Ticks every 1 min to see if there's activity.
 	game.goSafe(game.AchievementEngine.StartEventProcessor) // Listens to achievement events
-	return game
 }
 
 func InitEventChan(game *Game) {
