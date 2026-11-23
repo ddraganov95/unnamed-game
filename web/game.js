@@ -71,8 +71,14 @@
         term.writeln("\r\nConnection lost.");
     };
 
-    ws.onclose = () => {
-        if (!connectionEstablished) {
+    // Must match CloseCodeJoinRejected in internal/server/server.go
+    const CLOSE_JOIN_REJECTED = 4001;
+
+    ws.onclose = (event) => {
+        if (event.code === CLOSE_JOIN_REJECTED) {
+            // Server accepted the socket but the game refused us (e.g. full)
+            window.location.href = '/lobby.html?error=' + encodeURIComponent("Connection rejected: " + (event.reason || "Game is unavailable."));
+        } else if (!connectionEstablished) {
             // Handshake failed or rejected by server
             window.location.href = '/lobby.html?error=' + encodeURIComponent("Connection rejected: Game is full or unavailable.");
         } else {

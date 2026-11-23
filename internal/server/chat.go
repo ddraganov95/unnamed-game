@@ -15,7 +15,7 @@ func (server *Server) BroadcastGlobalMessage(msg string) {
 	if len(server.chatHistory) > game.MaxChatHistory {
 		server.chatHistory = server.chatHistory[1:]
 	}
-	for _, connection := range server.lobbyConns {
+	for connection := range server.lobbyConns {
 		select {
 		case connection.Write <- msg:
 		default:
@@ -23,9 +23,18 @@ func (server *Server) BroadcastGlobalMessage(msg string) {
 	}
 	server.lobbyMu.Unlock()
 
-	select {
-	case server.globalChat <- msg:
-	default:
+	// Fan out to every game: a channel delivers each value to only one
+	// reader, so games can't share one global chat channel.
+	server.mu.RLock()
+	games := make([]*game.Game, 0, len(server.activeGames))
+	for _, g := range server.activeGames {
+		games = append(games, g)
+	}
+	server.mu.RUnlock()
+	for _, g := range games {
+		if !g.DeliverGlobalChat(msg) {
+			log.Printf("[CHAT] Game %s chat inbox full; global message dropped for it", g.GameId)
+		}
 	}
 }
 func (server *Server) SendGlobalChatToDB(playerId string, message string) {

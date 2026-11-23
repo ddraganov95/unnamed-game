@@ -45,6 +45,9 @@ func InitializeGame() *Game {
 		State:       StateGamePlaying,
 		DestroyChan: make(chan struct{}),
 		GameChat:    make(chan string, MaxChatHistory),
+		// Each game has its own global chat inbox; the server fans every
+		// message out to all games (see DeliverGlobalChat).
+		GlobalChat: make(chan string, MaxChatHistory),
 	}
 	game.InitFrame()
 	InitEventChan(game)
@@ -66,15 +69,29 @@ func (game *Game) goSafe(fn func()) {
 		fn()
 	}()
 }
-func NewGame(gameId uuid.UUID, globalChat chan string, achievementCatalog *AchievementCatalog) *Game {
+// NewGame creates a game and starts its goroutines.
+func NewGame(gameId uuid.UUID, achievementCatalog *AchievementCatalog) *Game {
+	game := CreateGame(gameId, achievementCatalog)
+	game.Start()
+	return game
+}
+
+// CreateGame builds a game without starting any goroutines, so a caller can
+// do fallible setup (e.g. the DB insert) first and simply drop the game if
+// it fails. Call Start once the game is ready to run.
+func CreateGame(gameId uuid.UUID, achievementCatalog *AchievementCatalog) *Game {
 	game := InitializeGame()
-	game.GlobalChat = globalChat
 	game.GameId = gameId
 	game.AchievementEngine = NewAchievementEngine(achievementCatalog, game.DestroyChan, game.ServerEventChan)
+	return game
+}
+
+// Start launches the game loop, the idle ticker and the achievement
+// processor. They run until the game is destroyed. Call it once.
+func (game *Game) Start() {
 	game.goSafe(game.StartGame)                             // Start the game loop
 	game.goSafe(game.HandleEmptyGame)                       // Ticks every 1 min to see if there's activity.
 	game.goSafe(game.AchievementEngine.StartEventProcessor) // Listens to achievement events
-	return game
 }
 
 func InitEventChan(game *Game) {
@@ -106,32 +123,38 @@ func (game *Game) StartGame() {
 			log.Println("[DEBUG] StartGame loop terminated.")
 			return
 		case <-ticker.C:
-			game.Mu.Lock()
-			game.ProcessInputs()
-			game.PollChat()
-			for _, player := range game.GetActivePlayers() {
-				player.UpdatePlayer(game)
-			}
-			if game.State == StateGamePlaying {
-				game.UpdateGame()
-			}
-			game.Mu.Unlock()
+			game.Tick()
+		}
+	}
+}
 
-			for _, player := range game.GetActivePlayers() {
-				var renderedFrame string
-				switch game.State {
-				case StateGamePlaying:
-					renderedFrame = game.DrawLevelForPlayer(game.Level, player)
-				case StateGameIntermission:
-					renderedFrame = game.DrawLevelIntermissionForPlayer(game.Level, player)
-				case StateGameOver:
-					renderedFrame = game.DrawGameOverForPlayer(game.Level, player)
-				}
-				select {
-				case player.DisplayChan <- renderedFrame:
-				default:
-				}
-			}
+// Tick runs one iteration of the game loop: process inputs and chat, update
+// players and the level, then render and push a frame to every active player.
+func (game *Game) Tick() {
+	game.Mu.Lock()
+	game.ProcessInputs()
+	game.PollChat()
+	for _, player := range game.GetActivePlayers() {
+		player.UpdatePlayer(game)
+	}
+	if game.State == StateGamePlaying {
+		game.UpdateGame()
+	}
+	game.Mu.Unlock()
+
+	for _, player := range game.GetActivePlayers() {
+		var renderedFrame string
+		switch game.State {
+		case StateGamePlaying:
+			renderedFrame = game.DrawLevelForPlayer(game.Level, player)
+		case StateGameIntermission:
+			renderedFrame = game.DrawLevelIntermissionForPlayer(game.Level, player)
+		case StateGameOver:
+			renderedFrame = game.DrawGameOverForPlayer(game.Level, player)
+		}
+		select {
+		case player.DisplayChan <- renderedFrame:
+		default:
 		}
 	}
 }
@@ -159,41 +182,49 @@ func (game *Game) HandleEmptyGame() {
 			log.Println("[DEBUG] HandleEmptyGame loop terminated.")
 			return
 		case <-ticker.C:
-			game.Mu.Lock()
-			log.Printf("[DEBUG] AFK TIMER TICK!")
-			for _, p := range game.Players {
-				p.AFKMinutes++
-				log.Printf("[DEBUG] Player %s afk for %d minute(s)", p.GetID(), p.AFKMinutes)
-				if p.AFKMinutes >= PlayerAllowedAFKMins {
-					game.AchievementEngine.PublishEvent(AchievementEvent{
-						PlayerIDs: game.GetActiveAndAlivePlayerID(),
-						Key:       "GAME:default",
-						Amount:    0,
-					})
-					game.HandlePlayerDisconnect(p.GetID())
-				}
+			if game.IdleTick() {
+				game.Destroy(DestroyReasonIdleCheck.String())
+				return
 			}
-			if len(game.GetActivePlayers()) == 0 || game.State != StateGamePlaying {
-				game.EmptyMinutes++
-				log.Printf("[DEBUG] Game empty for %d minute(s)", game.EmptyMinutes)
-				game.CreateLog("[SERVER] Game ending in %d minute(s)", StopGameAfterIdleMinutes-game.EmptyMinutes)
-				game.AchievementEngine.PublishEvent(AchievementEvent{
-					PlayerIDs: game.GetActiveAndAlivePlayerID(),
-					Key:       "GAME:default",
-					Amount:    0,
-				})
-				if game.EmptyMinutes >= StopGameAfterIdleMinutes {
-					log.Println("[DEBUG] Idle threshold reached via ticker. Shutting down game.")
-					game.Mu.Unlock()
-					game.Destroy(DestroyReasonIdleCheck.String())
-					return
-				}
-			} else {
-				game.EmptyMinutes = 0
-			}
-			game.Mu.Unlock()
 		}
 	}
+}
+
+// IdleTick runs one minute of AFK/idle bookkeeping. It returns true when the
+// game has been idle long enough that the caller should destroy it.
+func (game *Game) IdleTick() bool {
+	game.Mu.Lock()
+	defer game.Mu.Unlock()
+	log.Printf("[DEBUG] AFK TIMER TICK!")
+	for _, p := range game.Players {
+		p.AFKMinutes++
+		log.Printf("[DEBUG] Player %s afk for %d minute(s)", p.GetID(), p.AFKMinutes)
+		if p.AFKMinutes >= PlayerAllowedAFKMins {
+			game.AchievementEngine.PublishEvent(AchievementEvent{
+				PlayerIDs: game.GetActiveAndAlivePlayerID(),
+				Key:       "GAME:default",
+				Amount:    0,
+			})
+			game.HandlePlayerDisconnect(p.GetID())
+		}
+	}
+	if len(game.GetActivePlayers()) == 0 || game.State != StateGamePlaying {
+		game.EmptyMinutes++
+		log.Printf("[DEBUG] Game empty for %d minute(s)", game.EmptyMinutes)
+		game.CreateLog("[SERVER] Game ending in %d minute(s)", StopGameAfterIdleMinutes-game.EmptyMinutes)
+		game.AchievementEngine.PublishEvent(AchievementEvent{
+			PlayerIDs: game.GetActiveAndAlivePlayerID(),
+			Key:       "GAME:default",
+			Amount:    0,
+		})
+		if game.EmptyMinutes >= StopGameAfterIdleMinutes {
+			log.Println("[DEBUG] Idle threshold reached via ticker. Shutting down game.")
+			return true
+		}
+	} else {
+		game.EmptyMinutes = 0
+	}
+	return false
 }
 
 type DestroyReason int
@@ -214,13 +245,27 @@ func (dr DestroyReason) String() string {
 	}
 }
 
+// Destroy ends the game. Callers outside the game loop use this; the loop
+// itself (which already holds game.Mu) uses destroyLocked.
 func (game *Game) Destroy(reason string) {
+	game.Mu.Lock()
+	defer game.Mu.Unlock()
+	game.destroyLocked(reason)
+}
+
+// destroyLocked ends the game. Caller must hold game.Mu. Players still
+// connected are disconnected first so their sessions are saved like any
+// other disconnect (the server handles those events before GameDestroy).
+func (game *Game) destroyLocked(reason string) {
 	select {
 	case <-game.DestroyChan:
 		return // Already destroyed, exit safely
 	default:
-		close(game.DestroyChan) // Safe to close
 	}
+	for _, p := range game.GetActivePlayers() {
+		game.HandlePlayerDisconnect(p.GetID())
+	}
+	close(game.DestroyChan)
 	dcChan := make(chan error)
 	game.ServerEventChan <- ServerEvent{
 		Type:     EventTypeGameDestroy,
@@ -267,7 +312,24 @@ func (game *Game) SpawnPlayer(player *Player) {
 
 func (game *Game) HandlePlayerConnect(event GameEvent) error {
 	log.Println("[DEBUG] Player Connecting")
+	// Authoritative capacity check: this runs inside the game loop, so unlike
+	// the join pre-check it cannot race with other players connecting. A
+	// player who is still counted as active (reconnect) keeps their slot.
+	if player, active := game.GetActivePlayerById(event.PlayerID); active {
+		// Reconnect while the old socket is still registered (page refresh):
+		// the new connection takes over the player as-is. Re-placing them
+		// here would leave a stale tile entry behind.
+		log.Printf("[DEBUG] %s reconnected (conn %d -> %d)", event.PlayerID, player.ConnID, event.ConnID)
+		player.ConnID = event.ConnID
+		game.EmptyMinutes = 0
+		return nil
+	}
+	if err := game.ValidateSpace(); err != nil {
+		return err
+	}
 	if player, exists := game.GetPlayerByID(event.PlayerID); exists {
+		player.ConnID = event.ConnID
+		player.startPlayTime()
 		log.Println("[DEBUG] Existing Player Connecting")
 		if game.LevelsCompleted == player.LevelsCompleted {
 			if !game.Level.PutEntityAtPosition(player, player.GetPosition()) {
@@ -285,6 +347,8 @@ func (game *Game) HandlePlayerConnect(event GameEvent) error {
 			log.Printf("[ERROR] Expected map[string]string in event.Object, got %T", event.Object)
 		}
 		player := NewPlayer(event.PlayerID, keybinds)
+		player.ConnID = event.ConnID
+		player.startPlayTime()
 		player.GameID = game.GameId.String()
 		log.Printf("[DEBUG] New Player Game id: %s", player.GameID)
 		game.SpawnPlayer(player)
@@ -293,15 +357,51 @@ func (game *Game) HandlePlayerConnect(event GameEvent) error {
 	return nil
 }
 
+// PlayerDisconnectPayload travels on the EventTypeDisconnect server event.
+// It is built inside the game loop so the server never reads live player
+// state, and it carries only what has not been saved yet.
+type PlayerDisconnectPayload struct {
+	Unsaved             PlayerSessionSummary // deltas since the last save
+	AchievementProgress []AchProgressDTO     // full current progress (upserted)
+	Achievements        []AchievementView    // for the client's session summary
+}
+
+// HandlePlayerDisconnect must be called with game.Mu held (game loop).
 func (game *Game) HandlePlayerDisconnect(playerID string) {
 	log.Println("[DEBUG] Player Disconnecting")
 	if player, exists := game.GetActivePlayerById(playerID); exists {
 		player.PlayerState = StateDisconnected
+		player.stopPlayTime()
+		payload := PlayerDisconnectPayload{
+			Unsaved: player.TakeUnsavedSummary(),
+			// Export before RemovePlayerSession, which discards the progress.
+			AchievementProgress: game.AchievementEngine.ExportPlayerProgress(playerID),
+			Achievements:        game.AchievementEngine.BuildClientAchievementPayload(playerID),
+		}
 		game.AchievementEngine.RemovePlayerSession(playerID)
 		game.Level.RemoveEntity(player)
-		game.ServerEventChan <- ServerEvent{PlayerID: playerID, Type: EventTypeDisconnect}
+		game.ServerEventChan <- ServerEvent{PlayerID: playerID, Type: EventTypeDisconnect, ConnID: player.ConnID, Object: payload}
 		log.Printf("[DEBUG] Player %s Disconnected", playerID)
 	}
+}
+
+// HandlePlayerQuit disconnects the player and destroys the game when nobody
+// is left. Caller must hold game.Mu (it runs inside the game loop).
+func (game *Game) HandlePlayerQuit(playerID string) {
+	log.Printf("[DEBUG] Player %s quit", playerID)
+	game.HandlePlayerDisconnect(playerID)
+	if len(game.GetActivePlayers()) == 0 {
+		log.Printf("[DEBUG] Game destroy")
+		game.destroyLocked(DestroyReasonPlayerQuit.String())
+	}
+}
+
+// HandleNextLevel generates the next level and resumes play. Caller must
+// hold game.Mu (it runs inside the game loop).
+func (game *Game) HandleNextLevel() {
+	NewLevel(game)
+	game.EmptyMinutes = 0
+	game.State = StateGamePlaying
 }
 
 func (game *Game) GetPlayerByID(playerID string) (*Player, bool) {
@@ -342,7 +442,42 @@ func (game *Game) GetActivePlayerById(playerId string) (*Player, bool) {
 	return nil, false
 }
 
+// IsDestroyed reports whether Destroy has been called.
+func (game *Game) IsDestroyed() bool {
+	select {
+	case <-game.DestroyChan:
+		return true
+	default:
+		return false
+	}
+}
+
+// SendEvent queues an event for the game loop. It waits while the queue is
+// full (the loop drains it every tick) but gives up and returns false once
+// the game is destroyed, since nothing reads EventChan after that. Code
+// outside the game loop must use this instead of sending to EventChan.
+func (game *Game) SendEvent(ev GameEvent) bool {
+	select {
+	case <-game.DestroyChan:
+		return false
+	default:
+	}
+	select {
+	case game.EventChan <- ev:
+		return true
+	case <-game.DestroyChan:
+		return false
+	}
+}
+
+// Validate is a pre-check for joining, called from HTTP handlers (outside the
+// game loop). Capacity is enforced again on connect by HandlePlayerConnect.
 func (game *Game) Validate(playerid string) error {
+	game.Mu.RLock()
+	defer game.Mu.RUnlock()
+	if game.IsDestroyed() {
+		return fmt.Errorf("Game has ended")
+	}
 	if game.State == StateGameOver {
 		return fmt.Errorf("Game is over!")
 	}
@@ -581,6 +716,18 @@ func (game *Game) PollChat() {
 		default:
 			return
 		}
+	}
+}
+
+// DeliverGlobalChat queues a global chat message for this game without
+// blocking; it returns false if the game's inbox is full (message dropped).
+// Safe to call from any goroutine.
+func (game *Game) DeliverGlobalChat(msg string) bool {
+	select {
+	case game.GlobalChat <- msg:
+		return true
+	default:
+		return false
 	}
 }
 

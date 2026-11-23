@@ -91,7 +91,11 @@ func removeProjectileSlice(slice []*Projectile, target *Projectile) []*Projectil
 	for i, p := range slice {
 		if p == target {
 			log.Printf(" -> MATCH FOUND at index %d! Removing...", i)
-			return append(slice[:i], slice[i+1:]...)
+			// Build a new slice instead of shifting in place: an in-place
+			// remove mutates the array a caller may be ranging over (UpdateGame).
+			out := make([]*Projectile, 0, len(slice)-1)
+			out = append(out, slice[:i]...)
+			return append(out, slice[i+1:]...)
 		}
 	}
 	return slice
@@ -104,7 +108,10 @@ func removeEnemySlice(slice []*Enemy, id string) []*Enemy {
 	for i, e := range slice {
 		log.Printf("comparing %s with %s", e.GetID(), id)
 		if e.GetID() == id {
-			return append(slice[:i], slice[i+1:]...)
+			// New slice, not an in-place shift: UpdateGame ranges over this array.
+			out := make([]*Enemy, 0, len(slice)-1)
+			out = append(out, slice[:i]...)
+			return append(out, slice[i+1:]...)
 		}
 	}
 	return slice

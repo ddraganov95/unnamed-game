@@ -286,17 +286,25 @@ func (e *AchievementEngine) evaluateEvent(event AchievementEvent) {
 				continue
 			}
 
-			e.checkAndApplyProgress(playerID, p, achDef, target, event.Key, event.Amount)
+			// Notify after the player lock is released: the send can block
+			// while the server listener is busy, and the listener itself
+			// needs that lock (ExportPlayerProgress on disconnect).
+			if e.checkAndApplyProgress(playerID, p, achDef, target, event.Key, event.Amount) {
+				e.onAchievementUnlocked(playerID, achDef)
+			}
 		}
 	}
 }
 
-func (e *AchievementEngine) checkAndApplyProgress(playerID string, p *PlayerProgress, def *AchievementDef, target AchReqTarget, eventKey string, amount int64) {
+// checkAndApplyProgress applies one event to the player's progress and
+// reports whether it just unlocked def. It must not notify the server
+// itself, because it runs with the player's progress lock held.
+func (e *AchievementEngine) checkAndApplyProgress(playerID string, p *PlayerProgress, def *AchievementDef, target AchReqTarget, eventKey string, amount int64) (unlocked bool) {
 	p.Lock()
 	defer p.Unlock()
 
 	if p.Unlocked[def.ID] {
-		return
+		return false
 	}
 
 	reqKey := fmt.Sprintf("%s:%d:%d", target.AchievementID, target.GroupID, target.BitIndex)
@@ -321,7 +329,7 @@ func (e *AchievementEngine) checkAndApplyProgress(playerID string, p *PlayerProg
 
 		if currentMask == groupDef.TargetMask {
 			p.Unlocked[def.ID] = true
-			e.onAchievementUnlocked(playerID, def)
+			unlocked = true
 		} else {
 			p.GroupMasks[def.ID][target.GroupID] = 0
 			groupPrefix := fmt.Sprintf("%s:%d:", def.ID.String(), target.GroupID)
@@ -345,7 +353,7 @@ func (e *AchievementEngine) checkAndApplyProgress(playerID string, p *PlayerProg
 
 		if currentMask == groupDef.TargetMask {
 			p.Unlocked[def.ID] = true
-			e.onAchievementUnlocked(playerID, def)
+			unlocked = true
 		} else {
 			p.GroupMasks[def.ID][target.GroupID] = 0
 			groupPrefix := fmt.Sprintf("%s:%d:", def.ID.String(), target.GroupID)
@@ -375,10 +383,11 @@ func (e *AchievementEngine) checkAndApplyProgress(playerID string, p *PlayerProg
 			groupDef := def.Groups[target.GroupID]
 			if p.GroupMasks[def.ID][target.GroupID] == groupDef.TargetMask {
 				p.Unlocked[def.ID] = true
-				e.onAchievementUnlocked(playerID, def)
+				unlocked = true
 			}
 		}
 	}
+	return unlocked
 }
 
 func (e *AchievementEngine) isAchievementComplete(def *AchievementDef, p *PlayerProgress) bool {
@@ -400,7 +409,7 @@ func (e *AchievementEngine) onAchievementUnlocked(playerID string, def *Achievem
 	message := fmt.Sprintf("[Achievement]: %s unlocked %s!", playerID, def.Title)
 	log.Printf("[Achievement] Player '%s' unlocked '%s' (%s)\n", playerID, def.Code, def.ID)
 	log.Printf("[ACHIEVEMENT DEBUG] Checking def fields: Code=%s, Title=%s, ID=%v, IsGlobal=%t\n", def.Code, def.Title, def.ID, def.IsGlobalAnnouncement)
-	e.serverEventChan <- ServerEvent{
+	ev := ServerEvent{
 		Type:     EventTypeAchievementUnlocked,
 		PlayerID: playerID,
 		Value:    def.ID.String(),
@@ -408,6 +417,12 @@ func (e *AchievementEngine) onAchievementUnlocked(playerID string, def *Achievem
 			Message:              message,
 			IsGlobalAnnouncement: def.IsGlobalAnnouncement,
 		},
+	}
+	select {
+	case e.serverEventChan <- ev:
+	case <-e.gameDestroyChan:
+		// Game is gone and the server listener with it; don't block forever.
+		log.Printf("[ACHIEVEMENT] Game destroyed, dropping unlock '%s' for '%s'", def.Code, playerID)
 	}
 }
 

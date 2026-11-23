@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 type Player struct {
@@ -17,6 +18,10 @@ type Player struct {
 	KeyBindings         map[rune]func(g *Game)
 	TypingKeyBindings   map[rune]func(g *Game)
 	DisplayChan         chan string
+	ConnID              uint64 // current websocket (see GameEvent.ConnID)
+	playStart           time.Time            // start of the current connected stretch (zero when disconnected)
+	playedTime          time.Duration        // connected time from finished stretches
+	saved               PlayerSessionSummary // what has already been written to user_stats
 	KeyQueue            []rune
 	UnlockedAttacks     []Attack
 	LastDamageRecieved  Damage
@@ -104,20 +109,21 @@ func (player *Player) UpdatePlayer(game *Game) {
 		return
 	}
 	keyPresses := player.KeyQueue
-	if player.PlayerState == StatePlaying {
-		if player.CurrentAttackSpeed > 0 {
-			player.CurrentAttackSpeed--
-		}
-		for _, key := range keyPresses {
+	if player.PlayerState == StatePlaying && player.CurrentAttackSpeed > 0 {
+		player.CurrentAttackSpeed--
+	}
+	// Dispatch each key by the state at that moment: an Enter earlier in the
+	// batch can switch to typing, and later keys must be typed, not run as commands.
+	for _, key := range keyPresses {
+		switch player.PlayerState {
+		case StateDisconnected:
+			player.KeyQueue = nil
+			return // quit earlier in this batch
+		case StatePlaying:
 			if function, exists := player.KeyBindings[unicode.ToLower(key)]; exists {
 				function(game)
 			}
-		}
-		player.KeyQueue = nil
-		return
-	}
-	if player.PlayerState == StateTyping {
-		for _, key := range keyPresses {
+		case StateTyping:
 			if function, exists := player.TypingKeyBindings[key]; exists {
 				function(game)
 			} else {
@@ -301,21 +307,20 @@ func (player *Player) QuitGame(game *Game) {
 		Key:       "GAME:default",
 		Amount:    0,
 	})
-	game.EventChan <- GameEvent{
-		Type:     EventTypePlayerQuit,
-		PlayerID: player.GetID(),
-	}
 	game.CreateLog("Quitting Game...")
+	// Runs inside the game loop (which holds game.Mu and is the only reader
+	// of EventChan), so handle it directly: sending to EventChan from here
+	// deadlocks the loop when the channel is full.
+	game.HandlePlayerQuit(player.GetID())
 }
 func (player *Player) GetNextLevel(game *Game) {
 	log.Printf("[DEBUG] %s ,Pressed Space!", player.GetID())
-	if !player.IsAlive() && game.State != StateGameIntermission {
+	// Only an alive player, and only during intermission, may start the next
+	// level (otherwise space would regenerate the level mid-fight).
+	if !player.IsAlive() || game.State != StateGameIntermission {
 		return
 	}
-	game.EventChan <- GameEvent{
-		Type:     EventTypeGetNextLevel,
-		PlayerID: player.GetID(),
-	}
+	game.HandleNextLevel() // see QuitGame for why this is not sent to EventChan
 }
 func (player *Player) CopyGameId(game *Game) {
 	game.ServerEventChan <- ServerEvent{
@@ -362,7 +367,8 @@ func (player *Player) GetCursor() string {
 }
 func (player *Player) RemoveLastByteMessage(game *Game) {
 	if len(player.MessageBuffer) > 0 {
-		player.MessageBuffer = player.MessageBuffer[:len(player.MessageBuffer)-1]
+		_, size := utf8.DecodeLastRuneInString(player.MessageBuffer)
+		player.MessageBuffer = player.MessageBuffer[:len(player.MessageBuffer)-size]
 	}
 }
 func (player *Player) SendMessage(game *Game) {
