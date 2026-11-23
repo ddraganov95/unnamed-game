@@ -119,13 +119,11 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 	for event := range g.ServerEventChan {
 		switch event.Type {
 		case game.EventTypeDisconnect:
-			server.handlePlayerDisconnectEvent(g, event.PlayerID, event.ConnID)
+			payload, _ := event.Object.(game.PlayerDisconnectPayload)
+			server.handlePlayerDisconnectEvent(g, event.PlayerID, event.ConnID, payload)
 		case game.EventTypeGameDestroy:
-			playersToDisconnect := make([]*game.Player, len(g.Players))
-			copy(playersToDisconnect, g.Players)
-			for _, p := range playersToDisconnect {
-				server.handlePlayerDisconnectEvent(g, p.PlayerID, 0)
-			}
+			// Players still connected were disconnected by the game just
+			// before this event, so their sessions are already saved.
 			err := server.handleGameFinalization(g, event.Value)
 			log.Printf("Game ending with status %s", event.Value)
 			event.RespChan <- err
@@ -189,60 +187,48 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 	}
 
 }
-// handlePlayerDisconnectEvent saves the player's session and closes their
-// socket. connID is the connection the game disconnected (0 = whichever is
-// registered); if the player has already reconnected on a newer socket, that
-// socket is left alone.
-func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string, connID uint64) {
-	server.mu.RLock()
-	connection, exists := server.activeConns[playerID]
-	server.mu.RUnlock()
-	if !exists {
-		log.Printf("[WARN] No active connection found for player %s on disconnect\n", playerID)
-		return
-	}
-	if connID != 0 && connection.ConnID != connID {
-		log.Printf("[DEBUG] Disconnect of old connection %d for %s; newer connection %d kept", connID, playerID, connection.ConnID)
-		return
-	}
+// handlePlayerDisconnectEvent runs for every player the game disconnected
+// (quit, closed tab, AFK kick, game end). It always saves the unsaved part of
+// the session; then, if the player's socket is still registered, sends it the
+// session summary and closes it. connID is the connection the game
+// disconnected (0 = whichever is registered); a newer socket from a
+// reconnect is left alone.
+func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string, connID uint64, payload game.PlayerDisconnectPayload) {
 	server.mu.RLock()
 	userID, ok := server.playerUsers[playerID]
+	connection, connExists := server.activeConns[playerID]
 	server.mu.RUnlock()
+	if connExists && connID != 0 && connection.ConnID != connID {
+		log.Printf("[DEBUG] Disconnect of old connection %d for %s; newer connection %d kept", connID, playerID, connection.ConnID)
+		connExists = false
+	}
+
+	var userStats any
+	saved := false
 	if !ok {
-		log.Printf("[ERROR] No user ID found for player %s on disconnect\n", playerID)
-		return
-	}
-	if targetGame, tGameFound := server.FindGameByPlayerId(playerID); tGameFound {
-		if targetGame.GameId != g.GameId {
-			log.Printf("[ERROR] Player %s is associated with a different game (%s) than the current game (%s) on disconnect\n", playerID, targetGame.GameId, g.GameId)
-			return
-		}
-	}
-	player, ok := g.GetPlayerByID(playerID)
-	if !ok {
-		log.Printf("[ERROR] Failed to get player %s from game to disconnect\n", playerID)
-		return
-	}
-	achievementProgress := g.AchievementEngine.ExportPlayerProgress(player.PlayerID)
-	log.Printf("[DISCONNECT DEBUG] PlayerID: '%s' maps to UserID: '%s'", playerID, userID)
-	log.Printf("[DISCONNECT DEBUG] Exported Achievement Progress payload type: %T, value: %+v", achievementProgress, achievementProgress)
-	ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
-	user_stats, err := server.db.UpdatePlayerAfterDisconnect(ctx, userID, player.GenerateSummary(), achievementProgress)
-	cancel()
-	achievementPayload := g.AchievementEngine.BuildClientAchievementPayload(player.PlayerID)
-	if err != nil {
-		log.Printf("[ERROR] Failed to save stats for %s on disconnect: %v\n", playerID, err)
+		log.Printf("[ERROR] No user ID found for player %s on disconnect; session not saved\n", playerID)
 	} else {
-		log.Printf("[DB] Successfully saved session summary for %s\n", playerID)
-		if exists {
-			connection.WriteJSON(map[string]any{
-				"type":         "session_summary",
-				"player_id":    playerID,
-				"user_stats":   user_stats,
-				"achievements": achievementPayload,
-			})
-			log.Printf("[DB] Successfully SENT session summary for %s\n", playerID)
+		ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
+		stats, err := server.db.UpdatePlayerAfterDisconnect(ctx, userID, payload.Unsaved, payload.AchievementProgress)
+		cancel()
+		if err != nil {
+			log.Printf("[ERROR] Failed to save stats for %s on disconnect: %v\n", playerID, err)
+		} else {
+			log.Printf("[DB] Successfully saved session summary for %s\n", playerID)
+			userStats, saved = stats, true
 		}
+	}
+
+	if !connExists {
+		return // socket already gone (closed tab) or replaced by a reconnect
+	}
+	if saved {
+		connection.WriteJSON(map[string]any{
+			"type":         "session_summary",
+			"player_id":    playerID,
+			"user_stats":   userStats,
+			"achievements": payload.Achievements,
+		})
 	}
 	server.DisconnectPlayer(g, playerID, connection)
 }

@@ -77,6 +77,54 @@ func CreateHealth(maxHealth int) Health {
 		MaxHealth:     maxHealth,
 	}
 }
+// startPlayTime marks the player as connected from now (no-op if already).
+func (player *Player) startPlayTime() {
+	if player.playStart.IsZero() {
+		player.playStart = time.Now()
+	}
+}
+
+// stopPlayTime closes the current connected stretch.
+func (player *Player) stopPlayTime() {
+	if !player.playStart.IsZero() {
+		player.playedTime += time.Since(player.playStart)
+		player.playStart = time.Time{}
+	}
+}
+
+// PlayTime is the total time the player has been connected in this game.
+func (player *Player) PlayTime() time.Duration {
+	d := player.playedTime
+	if !player.playStart.IsZero() {
+		d += time.Since(player.playStart)
+	}
+	return d
+}
+
+// TakeUnsavedSummary returns what has accumulated since the previous call
+// and marks it as saved. user_stats adds these values to its totals, so
+// saving the full summary on every disconnect would count earlier play again
+// (quit, rejoin the same game, quit). Counters and play time are deltas;
+// PlayerLevel and Score are absolute because the DB keeps their maximum.
+// Caller must hold game.Mu.
+func (player *Player) TakeUnsavedSummary() PlayerSessionSummary {
+	cur := player.GenerateSummary()
+	cur.SessionDuration = player.PlayTime()
+	prev := player.saved
+	player.saved = cur
+
+	delta := cur
+	delta.SessionDuration = cur.SessionDuration - prev.SessionDuration
+	delta.LevelsCompleted = cur.LevelsCompleted - prev.LevelsCompleted
+	delta.EnemiesKilled = cur.EnemiesKilled - prev.EnemiesKilled
+	delta.XPGained = cur.XPGained - prev.XPGained
+	delta.DamageDealt = cur.DamageDealt - prev.DamageDealt
+	delta.DamageTaken = cur.DamageTaken - prev.DamageTaken
+	// Deaths is 0/1 for "dead right now"; count a death only once.
+	delta.Deaths = max(0, cur.Deaths-prev.Deaths)
+	return delta
+}
+
 func (player *Player) GenerateSummary() PlayerSessionSummary {
 	deaths := 0
 	score := player.Score

@@ -18,6 +18,9 @@ type Player struct {
 	TypingKeyBindings   map[rune]func(g *Game)
 	DisplayChan         chan string
 	ConnID              uint64 // current websocket (see GameEvent.ConnID)
+	playStart           time.Time            // start of the current connected stretch (zero when disconnected)
+	playedTime          time.Duration        // connected time from finished stretches
+	saved               PlayerSessionSummary // what has already been written to user_stats
 	KeyQueue            []rune
 	UnlockedAttacks     []Attack
 	LastDamageRecieved  Damage

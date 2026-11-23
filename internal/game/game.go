@@ -228,13 +228,27 @@ func (dr DestroyReason) String() string {
 	}
 }
 
+// Destroy ends the game. Callers outside the game loop use this; the loop
+// itself (which already holds game.Mu) uses destroyLocked.
 func (game *Game) Destroy(reason string) {
+	game.Mu.Lock()
+	defer game.Mu.Unlock()
+	game.destroyLocked(reason)
+}
+
+// destroyLocked ends the game. Caller must hold game.Mu. Players still
+// connected are disconnected first so their sessions are saved like any
+// other disconnect (the server handles those events before GameDestroy).
+func (game *Game) destroyLocked(reason string) {
 	select {
 	case <-game.DestroyChan:
 		return // Already destroyed, exit safely
 	default:
-		close(game.DestroyChan) // Safe to close
 	}
+	for _, p := range game.GetActivePlayers() {
+		game.HandlePlayerDisconnect(p.GetID())
+	}
+	close(game.DestroyChan)
 	dcChan := make(chan error)
 	game.ServerEventChan <- ServerEvent{
 		Type:     EventTypeGameDestroy,
@@ -298,6 +312,7 @@ func (game *Game) HandlePlayerConnect(event GameEvent) error {
 	}
 	if player, exists := game.GetPlayerByID(event.PlayerID); exists {
 		player.ConnID = event.ConnID
+		player.startPlayTime()
 		log.Println("[DEBUG] Existing Player Connecting")
 		if game.LevelsCompleted == player.LevelsCompleted {
 			if !game.Level.PutEntityAtPosition(player, player.GetPosition()) {
@@ -316,6 +331,7 @@ func (game *Game) HandlePlayerConnect(event GameEvent) error {
 		}
 		player := NewPlayer(event.PlayerID, keybinds)
 		player.ConnID = event.ConnID
+		player.startPlayTime()
 		player.GameID = game.GameId.String()
 		log.Printf("[DEBUG] New Player Game id: %s", player.GameID)
 		game.SpawnPlayer(player)
@@ -324,13 +340,30 @@ func (game *Game) HandlePlayerConnect(event GameEvent) error {
 	return nil
 }
 
+// PlayerDisconnectPayload travels on the EventTypeDisconnect server event.
+// It is built inside the game loop so the server never reads live player
+// state, and it carries only what has not been saved yet.
+type PlayerDisconnectPayload struct {
+	Unsaved             PlayerSessionSummary // deltas since the last save
+	AchievementProgress []AchProgressDTO     // full current progress (upserted)
+	Achievements        []AchievementView    // for the client's session summary
+}
+
+// HandlePlayerDisconnect must be called with game.Mu held (game loop).
 func (game *Game) HandlePlayerDisconnect(playerID string) {
 	log.Println("[DEBUG] Player Disconnecting")
 	if player, exists := game.GetActivePlayerById(playerID); exists {
 		player.PlayerState = StateDisconnected
+		player.stopPlayTime()
+		payload := PlayerDisconnectPayload{
+			Unsaved: player.TakeUnsavedSummary(),
+			// Export before RemovePlayerSession, which discards the progress.
+			AchievementProgress: game.AchievementEngine.ExportPlayerProgress(playerID),
+			Achievements:        game.AchievementEngine.BuildClientAchievementPayload(playerID),
+		}
 		game.AchievementEngine.RemovePlayerSession(playerID)
 		game.Level.RemoveEntity(player)
-		game.ServerEventChan <- ServerEvent{PlayerID: playerID, Type: EventTypeDisconnect, ConnID: player.ConnID}
+		game.ServerEventChan <- ServerEvent{PlayerID: playerID, Type: EventTypeDisconnect, ConnID: player.ConnID, Object: payload}
 		log.Printf("[DEBUG] Player %s Disconnected", playerID)
 	}
 }
@@ -342,7 +375,7 @@ func (game *Game) HandlePlayerQuit(playerID string) {
 	game.HandlePlayerDisconnect(playerID)
 	if len(game.GetActivePlayers()) == 0 {
 		log.Printf("[DEBUG] Game destroy")
-		game.Destroy(DestroyReasonPlayerQuit.String())
+		game.destroyLocked(DestroyReasonPlayerQuit.String())
 	}
 }
 
