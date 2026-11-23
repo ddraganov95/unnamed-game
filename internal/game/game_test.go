@@ -115,6 +115,33 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// Capacity is enforced when the player actually connects (inside the game
+// loop), not only on the HTTP join pre-check, which reserves nothing.
+func TestConnectEnforcesCapacity(t *testing.T) {
+	g := newTestGame(t)
+	for i := 0; i < MaxPlayerCount; i++ {
+		if err := g.HandlePlayerConnect(GameEvent{PlayerID: fmt.Sprintf("p%d", i), Object: defaultKeybinds}); err != nil {
+			t.Fatalf("connect p%d: %v", i, err)
+		}
+	}
+	if err := g.HandlePlayerConnect(GameEvent{PlayerID: "extra", Object: defaultKeybinds}); err == nil {
+		t.Fatal("connect beyond MaxPlayerCount succeeded")
+	}
+	if _, ok := g.GetPlayerByID("extra"); ok {
+		t.Error("rejected player was added to the game")
+	}
+	// An active player reconnecting keeps their slot.
+	if err := g.HandlePlayerConnect(GameEvent{PlayerID: "p0", Object: defaultKeybinds}); err != nil {
+		t.Errorf("reconnect of active player rejected: %v", err)
+	}
+	// Once someone leaves, a new player fits again.
+	g.HandlePlayerDisconnect("p1")
+	drainServerEvents(g)
+	if err := g.HandlePlayerConnect(GameEvent{PlayerID: "extra", Object: defaultKeybinds}); err != nil {
+		t.Errorf("connect after a player left: %v", err)
+	}
+}
+
 func TestLevelCompleteMovesToIntermission(t *testing.T) {
 	g := newTestGame(t)
 	p := addPlayerAt(t, g, "alice", Position{X: 5, Y: 5})

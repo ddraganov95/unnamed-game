@@ -192,6 +192,15 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		PlayerID: playerID,
 	}
 	if err := server.RegisterPlayer(g, playerID, newConnection); err != nil {
+		// The upgrade already succeeded, so tell the client why with a close
+		// frame (web/game.js shows the reason in the lobby).
+		reason := err.Error()
+		if len(reason) > 120 { // control frame payload limit is 125 bytes
+			reason = reason[:120]
+		}
+		conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(CloseCodeJoinRejected, reason),
+			time.Now().Add(time.Second))
 		conn.Close()
 		return
 	}

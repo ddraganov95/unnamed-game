@@ -161,6 +161,9 @@ func (c *client) join(id uuid.UUID) *http.Response {
 type wsConn struct {
 	conn *websocket.Conn
 	msgs chan string
+	// readErr is the error that ended the reader (e.g. *websocket.CloseError).
+	// Safe to read once msgs is closed.
+	readErr error
 }
 
 func (c *client) dial(path string) (*wsConn, error) {
@@ -177,6 +180,7 @@ func (c *client) dial(path string) (*wsConn, error) {
 		for {
 			_, b, err := conn.ReadMessage()
 			if err != nil {
+				w.readErr = err
 				return
 			}
 			select {

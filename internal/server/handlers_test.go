@@ -3,18 +3,21 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 	"uuid"
 
 	"unnamed-game/internal/db"
 	"unnamed-game/internal/game"
 	"unnamed-game/internal/testutil"
 
+	"github.com/gorilla/websocket"
 	"go.uber.org/goleak"
 )
 
@@ -339,7 +342,6 @@ func TestJoinFullGameRejected(t *testing.T) {
 // websocket connect path never checks capacity. Players who joined but have
 // not connected yet are not counted, so any number can get in.
 func TestGameCapacityEnforcedOnConnect(t *testing.T) {
-	testutil.KnownBug(t, "MaxPlayerCount not enforced: join counts only connected players and connect never re-checks")
 	env := newTestEnv(t)
 	host := env.newClient("p0")
 	id := host.createGame()
@@ -353,9 +355,44 @@ func TestGameCapacityEnforcedOnConnect(t *testing.T) {
 		c.dial("/ws") // some may be rejected; that is fine
 	}
 	g, _ := env.game(id)
-	waitUntil(defaultWait, func() bool { return len(activePlayers(g)) > game.MaxPlayerCount })
+	// Passing case: the count never exceeds the max, so this waits the full
+	// second; all dials above have completed their handshake by then.
+	waitUntil(time.Second, func() bool { return len(activePlayers(g)) > game.MaxPlayerCount })
 	if n := len(activePlayers(g)); n > game.MaxPlayerCount {
 		t.Fatalf("%d players connected, max is %d", n, game.MaxPlayerCount)
+	}
+}
+
+// A player who passed the join pre-check but finds the game full when the
+// websocket connects gets a close frame with code 4001 and the reason, which
+// web/game.js shows in the lobby.
+func TestRejectedConnectSendsCloseReason(t *testing.T) {
+	env := newTestEnv(t)
+	host := env.newClient("p0")
+	id := host.createGame()
+	var late []*client
+	for i := 1; i <= game.MaxPlayerCount; i++ {
+		c := env.newClient(fmt.Sprintf("p%d", i))
+		if resp := c.join(id); resp.StatusCode != http.StatusOK {
+			t.Fatalf("join %d: %d", i, resp.StatusCode)
+		}
+		late = append(late, c)
+	}
+	host.mustDial("/ws").waitFor(t, defaultWait, "host frame", isFrame)
+	for _, c := range late[:game.MaxPlayerCount-1] {
+		c.mustDial("/ws").waitFor(t, defaultWait, "frame", isFrame)
+	}
+
+	ws := late[len(late)-1].mustDial("/ws") // game is full now
+	if !ws.closed(defaultWait) {
+		t.Fatal("server did not close the rejected connection")
+	}
+	var ce *websocket.CloseError
+	if !errors.As(ws.readErr, &ce) || ce.Code != CloseCodeJoinRejected {
+		t.Fatalf("close error = %v, want code %d", ws.readErr, CloseCodeJoinRejected)
+	}
+	if !strings.Contains(ce.Text, "full") {
+		t.Errorf("close reason %q should say the game is full", ce.Text)
 	}
 }
 

@@ -19,6 +19,9 @@ import (
 const (
 	DBWriteQueueSize = 256
 	DBWriteTimeout   = 5 * time.Second
+	// CloseCodeJoinRejected is the websocket close code sent when the game
+	// refuses the player after the upgrade (e.g. full). Mirrored in web/game.js.
+	CloseCodeJoinRejected = 4001
 )
 
 type dbWriteTask struct {

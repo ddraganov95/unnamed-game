@@ -281,6 +281,14 @@ func (game *Game) SpawnPlayer(player *Player) {
 
 func (game *Game) HandlePlayerConnect(event GameEvent) error {
 	log.Println("[DEBUG] Player Connecting")
+	// Authoritative capacity check: this runs inside the game loop, so unlike
+	// the join pre-check it cannot race with other players connecting. A
+	// player who is still counted as active (reconnect) keeps their slot.
+	if _, active := game.GetActivePlayerById(event.PlayerID); !active {
+		if err := game.ValidateSpace(); err != nil {
+			return err
+		}
+	}
 	if player, exists := game.GetPlayerByID(event.PlayerID); exists {
 		log.Println("[DEBUG] Existing Player Connecting")
 		if game.LevelsCompleted == player.LevelsCompleted {
@@ -403,7 +411,11 @@ func (game *Game) SendEvent(ev GameEvent) bool {
 	}
 }
 
+// Validate is a pre-check for joining, called from HTTP handlers (outside the
+// game loop). Capacity is enforced again on connect by HandlePlayerConnect.
 func (game *Game) Validate(playerid string) error {
+	game.Mu.RLock()
+	defer game.Mu.RUnlock()
 	if game.IsDestroyed() {
 		return fmt.Errorf("Game has ended")
 	}
