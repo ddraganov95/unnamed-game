@@ -109,7 +109,10 @@ func TestGameLoopUnderConcurrentEvents(t *testing.T) {
 	close(stop)
 	withTimeout(t, 5*time.Second, "event goroutines", wg.Wait)
 
-	// The loop must still be alive and responsive.
+	// The loop must still be alive and responsive. Free p1's slot first (the
+	// churn may have left p1 connected and the game is capped at
+	// MaxPlayerCount); events are processed in order.
+	g.EventChan <- GameEvent{Type: EventTypeDisconnect, PlayerID: "p1"}
 	connect(t, g, "late")
 	withTimeout(t, 5*time.Second, "Destroy", func() { g.Destroy("test") })
 }
