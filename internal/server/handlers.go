@@ -240,7 +240,7 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 		PlayerID: playerID,
 		Write:    make(chan string, 50),
 	}
-	server.lobbyConns[playerID] = chatConn
+	server.lobbyConns[chatConn] = struct{}{}
 	go func() {
 		for msg := range chatConn.Write {
 			conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
@@ -258,7 +258,7 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 
 	defer func() {
 		server.lobbyMu.Lock()
-		delete(server.lobbyConns, playerID)
+		delete(server.lobbyConns, chatConn)
 		server.lobbyMu.Unlock()
 		close(chatConn.Write)
 		conn.Close()
@@ -533,6 +533,14 @@ func (server *Server) HandleGetSelfConfig(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(userConfig)
 }
+// Keys hard-coded in game.Player.InitKeybindings (copy game ID, next level,
+// enter to type). A user keybind on one of these would be silently overridden.
+var reservedKeybindKeys = map[string]struct{}{
+	"c":  {},
+	" ":  {},
+	"\r": {},
+}
+
 func (server *Server) HandleUpdateSelfConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		http.Error(w, "Not allowed", http.StatusMethodNotAllowed)
@@ -566,6 +574,14 @@ func (server *Server) HandleUpdateSelfConfig(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
+		if _, reserved := reservedKeybindKeys[key]; reserved {
+			http.Error(w, fmt.Sprintf("Key '%s' is reserved and cannot be assigned to '%s'",
+				key,
+				db.GetActionLabel(action),
+			), http.StatusBadRequest)
+			return
+		}
+
 		if existingAction, exists := seenKeys[key]; exists {
 			http.Error(w, fmt.Sprintf("Key '%s' cannot be assigned to '%s' (already bound to '%s')",
 				key,
@@ -583,7 +599,9 @@ func (server *Server) HandleUpdateSelfConfig(w http.ResponseWriter, r *http.Requ
 
 	err = server.db.UpsertUserConfiguration(r.Context(), userID, userConfig)
 	if err != nil {
-		log.Printf("Error fetching config: %s", err)
+		log.Printf("Error saving config: %s", err)
+		http.Error(w, "failed to save configuration", http.StatusInternalServerError)
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(userConfig)

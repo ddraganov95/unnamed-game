@@ -15,7 +15,6 @@ import (
 
 	"unnamed-game/internal/db"
 	"unnamed-game/internal/game"
-	"unnamed-game/internal/testutil"
 
 	"github.com/gorilla/websocket"
 	"go.uber.org/goleak"
@@ -201,6 +200,10 @@ func TestConfigEndpoints(t *testing.T) {
 		`{"keybinds":{"move_up":"ww"}}`,
 		`{"keybinds":{"move_up":""}}`,
 		`{"keybinds":{"move_up":"x","move_down":"x"}}`,
+		// Reserved keys: hard-coded in game.Player.InitKeybindings.
+		`{"keybinds":{"move_left":"c"}}`,
+		`{"keybinds":{"move_left":" "}}`,
+		`{"keybinds":{"move_left":"\r"}}`,
 		`not json`,
 	}
 	for _, b := range bad {
@@ -222,7 +225,6 @@ func TestConfigEndpoints(t *testing.T) {
 // When the DB write fails, PUT /api/users/me/config still answers 200 with
 // the config echoed back, so the client believes it was saved.
 func TestUpdateConfigReportsDBFailure(t *testing.T) {
-	testutil.KnownBug(t, "PUT /api/users/me/config returns 200 even when saving to the DB fails")
 	env := newTestEnv(t)
 	req, _ := http.NewRequest("PUT", env.ts.URL+"/api/users/me/config", strings.NewReader(`{"keybinds":{"move_up":"i"}}`))
 	// Valid session format, but the user does not exist: the FK insert fails.

@@ -20,6 +20,8 @@ import (
 const (
 	DBWriteQueueSize = 256
 	DBWriteTimeout   = 5 * time.Second
+	// ShutdownGameTimeout bounds how long shutdown waits for active games to finalize.
+	ShutdownGameTimeout = 10 * time.Second
 	// CloseCodeJoinRejected is the websocket close code sent when the game
 	// refuses the player after the upgrade (e.g. full). Mirrored in web/game.js.
 	CloseCodeJoinRejected = 4001
@@ -40,7 +42,7 @@ type Server struct {
 	activeGames    map[uuid.UUID]*game.Game
 	playerSessions map[string]uuid.UUID
 	playerUsers    map[string]uuid.UUID
-	lobbyConns     map[string]*ChatWSConnection
+	lobbyConns     map[*ChatWSConnection]struct{}
 	achievementCat *game.AchievementCatalog
 	db             *db.Database
 	Mux            *http.ServeMux
@@ -143,7 +145,7 @@ func NewServerWithDB(ctx context.Context, database *db.Database, config ServerCo
 		activeConns:    make(map[string]*GameWSConnection),
 		activeGames:    make(map[uuid.UUID]*game.Game),
 		playerSessions: make(map[string]uuid.UUID),
-		lobbyConns:     make(map[string]*ChatWSConnection),
+		lobbyConns:     make(map[*ChatWSConnection]struct{}),
 		playerUsers:    make(map[string]uuid.UUID),
 		dbWriteChan:    make(chan dbWriteTask, DBWriteQueueSize),
 		Mux:            http.NewServeMux(),
@@ -191,8 +193,11 @@ func (s *Server) Run(ctx context.Context) error {
 		Handler: s.Mux,
 	}
 
+	shutdownDone := make(chan struct{})
+
 	// Watch for Ctrl+C signal cancelation in the background
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		log.Println("[SERVER] Shutdown signal received, closing HTTP server...")
 
@@ -202,6 +207,7 @@ func (s *Server) Run(ctx context.Context) error {
 		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
 			log.Printf("[SERVER] HTTP shutdown forced: %v", err)
 		}
+		s.endActiveGamesOnShutdown()
 	}()
 
 	log.Printf("[SERVER] Running at http://localhost%s\n", port)
@@ -211,6 +217,9 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 
+	// ListenAndServe returns as soon as shutdown starts; wait for the games'
+	// DB writes to finish before the process exits.
+	<-shutdownDone
 	log.Println("[SERVER] Server stopped")
 	return nil
 }
@@ -247,5 +256,36 @@ func (server *Server) enqueueDBWrite(name string, run func(context.Context) erro
 	case server.dbWriteChan <- dbWriteTask{name: name, run: run}:
 	default:
 		log.Printf("[DB WRITE] queue full, dropping %s", name)
+	}
+}
+
+// endActiveGamesOnShutdown ends every active game with the normal destroy
+// path, so each one's DB row is finalized and its players' sessions saved.
+// It waits (bounded by ShutdownGameTimeout) for the games to deactivate.
+func (s *Server) endActiveGamesOnShutdown() {
+	s.mu.RLock()
+	games := make([]*game.Game, 0, len(s.activeGames))
+	for _, g := range s.activeGames {
+		games = append(games, g)
+	}
+	s.mu.RUnlock()
+
+	for _, g := range games {
+		g.Destroy("server_shutdown")
+	}
+
+	deadline := time.Now().Add(ShutdownGameTimeout)
+	for {
+		s.mu.RLock()
+		remaining := len(s.activeGames)
+		s.mu.RUnlock()
+		if remaining == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			log.Printf("[SERVER] %d game(s) still active after shutdown timeout", remaining)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

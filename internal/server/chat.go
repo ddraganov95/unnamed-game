@@ -15,7 +15,7 @@ func (server *Server) BroadcastGlobalMessage(msg string) {
 	if len(server.chatHistory) > game.MaxChatHistory {
 		server.chatHistory = server.chatHistory[1:]
 	}
-	for _, connection := range server.lobbyConns {
+	for connection := range server.lobbyConns {
 		select {
 		case connection.Write <- msg:
 		default:

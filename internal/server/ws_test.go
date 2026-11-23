@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"unnamed-game/internal/game"
-	"unnamed-game/internal/testutil"
 )
 
 const defaultWait = 5 * time.Second
@@ -343,11 +342,7 @@ func TestLobbyChatSlowClientDoesNotBlockBroadcast(t *testing.T) {
 	}
 }
 
-// lobbyConns is keyed by playerID. A second lobby socket for the same player
-// (two tabs) replaces the first; when the first closes, its cleanup deletes
-// the map entry that now belongs to the second, which stops receiving chat.
 func TestLobbyChatTwoTabsSamePlayer(t *testing.T) {
-	testutil.KnownBug(t, "closing one of two lobby tabs for the same player removes the other tab from lobbyConns")
 	env := newTestEnv(t)
 	a := env.newClient("alice")
 	tab1 := a.mustDial("/ws/global-chat")
