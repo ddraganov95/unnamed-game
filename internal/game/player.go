@@ -316,7 +316,9 @@ func (player *Player) QuitGame(game *Game) {
 }
 func (player *Player) GetNextLevel(game *Game) {
 	log.Printf("[DEBUG] %s ,Pressed Space!", player.GetID())
-	if !player.IsAlive() && game.State != StateGameIntermission {
+	// Only an alive player, and only during intermission, may start the next
+	// level (otherwise space would regenerate the level mid-fight).
+	if !player.IsAlive() || game.State != StateGameIntermission {
 		return
 	}
 	game.HandleNextLevel() // see QuitGame for why this is not sent to EventChan

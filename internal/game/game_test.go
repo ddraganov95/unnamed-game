@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"unnamed-game/internal/testutil"
 )
 
 func TestConnectNewAndExistingPlayer(t *testing.T) {
@@ -290,11 +288,10 @@ func TestNextLevelFromIntermission(t *testing.T) {
 	}
 }
 
-// GetNextLevel's guard is `!alive && state != intermission`, so an ALIVE
-// player pressing space in the middle of a level generates a brand new level
+// The guard used to be `!alive && state != intermission`, so an ALIVE
+// player pressing space in the middle of a level generated a brand new level
 // (skipping the current one and resetting enemies).
 func TestSpaceDuringPlayDoesNotSkipLevel(t *testing.T) {
-	testutil.KnownBug(t, "pressing space while playing skips to a new level (GetNextLevel guard uses && instead of ||)")
 	g := newTestGame(t)
 	p := addPlayerAt(t, g, "alice", Position{X: 5, Y: 5})
 	addEnemyAt(g, "g", EnemyGoblin, Position{X: 40, Y: 40})
@@ -305,6 +302,47 @@ func TestSpaceDuringPlayDoesNotSkipLevel(t *testing.T) {
 
 	if g.Level != level {
 		t.Fatalf("space during play replaced the level")
+	}
+}
+
+// Space starts the next level only for an alive player during intermission.
+func TestNextLevelOnlyWhenAliveInIntermission(t *testing.T) {
+	states := map[GameState]string{
+		StateGamePlaying:      "playing",
+		StateGameIntermission: "intermission",
+		StateGameOver:         "game over",
+	}
+	for state, stateName := range states {
+		for _, alive := range []bool{true, false} {
+			name := stateName + "/dead"
+			if alive {
+				name = stateName + "/alive"
+			}
+			t.Run(name, func(t *testing.T) {
+				g := newTestGame(t)
+				p := addPlayerAt(t, g, "alice", Position{X: 5, Y: 5})
+				if !alive {
+					p.CurrentHealth = 0
+				}
+				g.State = state
+				level, total := g.Level, g.TotalLevels
+
+				press(g, p, ' ')
+
+				shouldAdvance := alive && state == StateGameIntermission
+				advanced := g.Level != level
+				if advanced != shouldAdvance {
+					t.Fatalf("advanced=%v, want %v", advanced, shouldAdvance)
+				}
+				if shouldAdvance {
+					if g.State != StateGamePlaying || g.TotalLevels != total+1 {
+						t.Errorf("after next level: state=%v TotalLevels=%d (was %d)", g.State, g.TotalLevels, total)
+					}
+				} else if g.State != state || g.TotalLevels != total {
+					t.Errorf("blocked press changed state=%v TotalLevels=%d (was %v, %d)", g.State, g.TotalLevels, state, total)
+				}
+			})
+		}
 	}
 }
 
