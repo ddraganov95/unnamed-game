@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 	"uuid"
-
-	"unnamed-game/internal/testutil"
 )
 
 var (
@@ -349,7 +347,6 @@ func TestAchievementEngineConcurrentUse(t *testing.T) {
 // listener (the only consumer of that channel) then calls
 // ExportPlayerProgress on disconnect and blocks on the same lock: deadlock.
 func TestUnlockWithFullServerChannelDoesNotBlockExport(t *testing.T) {
-	testutil.KnownBug(t, "achievement unlock blocks on a full ServerEventChan while holding the player lock; ExportPlayerProgress then deadlocks")
 	sc := make(chan ServerEvent, 1)
 	destroy := make(chan struct{})
 	e := NewAchievementEngine(testCatalog(t), destroy, sc)
@@ -371,4 +368,26 @@ func TestUnlockWithFullServerChannelDoesNotBlockExport(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // let the processor reach the blocking send
 
 	withTimeout(t, 2*time.Second, "ExportPlayerProgress", func() { e.ExportPlayerProgress("alice") })
+}
+
+// If the game is destroyed while an unlock is waiting on a full
+// ServerEventChan (the listener is gone), the processor must exit instead of
+// leaking forever.
+func TestUnlockAfterDestroyDoesNotLeakProcessor(t *testing.T) {
+	sc := make(chan ServerEvent, 1)
+	destroy := make(chan struct{})
+	e := NewAchievementEngine(testCatalog(t), destroy, sc)
+	e.LoadPlayerAchievements("alice", freshStates(testCatalog(t)))
+	sc <- ServerEvent{} // channel full, nobody will drain it
+	done := make(chan struct{})
+	go func() { e.StartEventProcessor(); close(done) }()
+
+	e.PublishEvent(AchievementEvent{PlayerIDs: []string{"alice"}, Key: "kill:imp", Amount: 1})
+	time.Sleep(100 * time.Millisecond) // processor is now blocked on the send
+	close(destroy)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("achievement processor still blocked after game destroy")
+	}
 }
