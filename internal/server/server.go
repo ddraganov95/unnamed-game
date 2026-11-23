@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 	"uuid"
 
@@ -46,6 +47,7 @@ type Server struct {
 	httpServer     *http.Server
 	globalChat     chan string
 	dbWriteChan    chan dbWriteTask
+	nextConnID     atomic.Uint64
 }
 type ServerConfig struct {
 	Host string `json:"host"`
@@ -57,6 +59,9 @@ type GameWSConnection struct {
 	Conn     *websocket.Conn
 	UserID   string
 	PlayerID string
+	// ConnID is unique per websocket; passed to the game on connect and
+	// disconnect so a replaced socket can't disconnect the newer one.
+	ConnID uint64
 	// writeMu serializes writes: gorilla/websocket allows only one
 	// concurrent writer and panics otherwise. Always write through
 	// WriteText/WriteJSON, never Conn.Write* directly.

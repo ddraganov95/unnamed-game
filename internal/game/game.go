@@ -284,12 +284,20 @@ func (game *Game) HandlePlayerConnect(event GameEvent) error {
 	// Authoritative capacity check: this runs inside the game loop, so unlike
 	// the join pre-check it cannot race with other players connecting. A
 	// player who is still counted as active (reconnect) keeps their slot.
-	if _, active := game.GetActivePlayerById(event.PlayerID); !active {
-		if err := game.ValidateSpace(); err != nil {
-			return err
-		}
+	if player, active := game.GetActivePlayerById(event.PlayerID); active {
+		// Reconnect while the old socket is still registered (page refresh):
+		// the new connection takes over the player as-is. Re-placing them
+		// here would leave a stale tile entry behind.
+		log.Printf("[DEBUG] %s reconnected (conn %d -> %d)", event.PlayerID, player.ConnID, event.ConnID)
+		player.ConnID = event.ConnID
+		game.EmptyMinutes = 0
+		return nil
+	}
+	if err := game.ValidateSpace(); err != nil {
+		return err
 	}
 	if player, exists := game.GetPlayerByID(event.PlayerID); exists {
+		player.ConnID = event.ConnID
 		log.Println("[DEBUG] Existing Player Connecting")
 		if game.LevelsCompleted == player.LevelsCompleted {
 			if !game.Level.PutEntityAtPosition(player, player.GetPosition()) {
@@ -307,6 +315,7 @@ func (game *Game) HandlePlayerConnect(event GameEvent) error {
 			log.Printf("[ERROR] Expected map[string]string in event.Object, got %T", event.Object)
 		}
 		player := NewPlayer(event.PlayerID, keybinds)
+		player.ConnID = event.ConnID
 		player.GameID = game.GameId.String()
 		log.Printf("[DEBUG] New Player Game id: %s", player.GameID)
 		game.SpawnPlayer(player)
@@ -321,7 +330,7 @@ func (game *Game) HandlePlayerDisconnect(playerID string) {
 		player.PlayerState = StateDisconnected
 		game.AchievementEngine.RemovePlayerSession(playerID)
 		game.Level.RemoveEntity(player)
-		game.ServerEventChan <- ServerEvent{PlayerID: playerID, Type: EventTypeDisconnect}
+		game.ServerEventChan <- ServerEvent{PlayerID: playerID, Type: EventTypeDisconnect, ConnID: player.ConnID}
 		log.Printf("[DEBUG] Player %s Disconnected", playerID)
 	}
 }

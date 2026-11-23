@@ -25,6 +25,10 @@ type GameEvent struct {
 	PlayerID string
 	Type     EventType
 	Key      rune
+	// ConnID identifies the websocket a Connect/Disconnect came from, so a
+	// late Disconnect from a replaced socket can't kick the newer session.
+	// 0 means "not tied to a connection" (always applies).
+	ConnID uint64
 }
 type ServerEvent struct {
 	RespChan chan error
@@ -32,6 +36,9 @@ type ServerEvent struct {
 	PlayerID string
 	Value    string
 	Type     EventType
+	// ConnID (on EventTypeDisconnect) is the connection the player had when
+	// disconnected; the server must not act on a newer connection.
+	ConnID uint64
 }
 
 func (game *Game) ProcessInputs() {
@@ -49,6 +56,10 @@ EventLoop:
 				event.RespChan <- err
 			case EventTypeDisconnect:
 				log.Printf("[DEBUG] Disco %s ", event.PlayerID)
+				if p, ok := game.GetPlayerByID(event.PlayerID); ok && event.ConnID != 0 && p.ConnID != event.ConnID {
+					log.Printf("[DEBUG] Ignoring disconnect of replaced connection %d for %s (current %d)", event.ConnID, event.PlayerID, p.ConnID)
+					break
+				}
 				game.HandlePlayerDisconnect(event.PlayerID)
 			case EventTypePlayerQuit:
 				game.HandlePlayerQuit(event.PlayerID)

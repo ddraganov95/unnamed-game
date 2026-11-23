@@ -141,7 +141,6 @@ func TestClosingSocketDisconnectsPlayerButKeepsGame(t *testing.T) {
 // deferred DisconnectPlayer then still sends EventTypeDisconnect for the
 // player id, which disconnects the NEW session as well.
 func TestReconnectKeepsNewSessionActive(t *testing.T) {
-	testutil.KnownBug(t, "reconnecting closes the old socket whose deferred disconnect can kick the new session (timing dependent, ~1 in 8 runs)")
 	env := newTestEnv(t)
 	c := env.newClient("alice")
 	id := c.createGame()

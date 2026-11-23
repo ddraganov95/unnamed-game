@@ -49,6 +49,7 @@ func (server *Server) RegisterPlayer(g *game.Game, playerID string, conn *GameWS
 		PlayerID: playerID,
 		RespChan: respChan,
 		Object:   userConfig.Keybinds,
+		ConnID:   conn.ConnID,
 	}) {
 		return errGameEnded
 	}
@@ -118,12 +119,12 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 	for event := range g.ServerEventChan {
 		switch event.Type {
 		case game.EventTypeDisconnect:
-			server.handlePlayerDisconnectEvent(g, event.PlayerID)
+			server.handlePlayerDisconnectEvent(g, event.PlayerID, event.ConnID)
 		case game.EventTypeGameDestroy:
 			playersToDisconnect := make([]*game.Player, len(g.Players))
 			copy(playersToDisconnect, g.Players)
 			for _, p := range playersToDisconnect {
-				server.handlePlayerDisconnectEvent(g, p.PlayerID)
+				server.handlePlayerDisconnectEvent(g, p.PlayerID, 0)
 			}
 			err := server.handleGameFinalization(g, event.Value)
 			log.Printf("Game ending with status %s", event.Value)
@@ -188,12 +189,20 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 	}
 
 }
-func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string) {
+// handlePlayerDisconnectEvent saves the player's session and closes their
+// socket. connID is the connection the game disconnected (0 = whichever is
+// registered); if the player has already reconnected on a newer socket, that
+// socket is left alone.
+func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string, connID uint64) {
 	server.mu.RLock()
 	connection, exists := server.activeConns[playerID]
 	server.mu.RUnlock()
 	if !exists {
 		log.Printf("[WARN] No active connection found for player %s on disconnect\n", playerID)
+		return
+	}
+	if connID != 0 && connection.ConnID != connID {
+		log.Printf("[DEBUG] Disconnect of old connection %d for %s; newer connection %d kept", connID, playerID, connection.ConnID)
 		return
 	}
 	server.mu.RLock()
@@ -249,6 +258,7 @@ func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn
 	g.SendEvent(game.GameEvent{ // no-op if the game already ended
 		Type:     game.EventTypeDisconnect,
 		PlayerID: playerID,
+		ConnID:   targetConn.ConnID, // ignored by the game if this socket was replaced
 	})
 }
 func (s *Server) processAndSaveEvents(g *game.Game, event game.ServerEvent) {

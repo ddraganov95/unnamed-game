@@ -17,6 +17,7 @@ type Player struct {
 	KeyBindings         map[rune]func(g *Game)
 	TypingKeyBindings   map[rune]func(g *Game)
 	DisplayChan         chan string
+	ConnID              uint64 // current websocket (see GameEvent.ConnID)
 	KeyQueue            []rune
 	UnlockedAttacks     []Attack
 	LastDamageRecieved  Damage

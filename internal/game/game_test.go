@@ -142,6 +142,80 @@ func TestConnectEnforcesCapacity(t *testing.T) {
 	}
 }
 
+// Page refresh: the new socket's Connect and the old socket's Disconnect can
+// reach the game loop in either order. Both orders must end with the player
+// active on the new connection, in one place on the map.
+func TestReconnectEventOrdering(t *testing.T) {
+	connect := func(g *Game, conn uint64) {
+		if err := g.HandlePlayerConnect(GameEvent{PlayerID: "alice", Object: defaultKeybinds, ConnID: conn}); err != nil {
+			t.Fatalf("connect conn %d: %v", conn, err)
+		}
+	}
+	disconnect := func(g *Game, conn uint64) {
+		g.EventChan <- GameEvent{Type: EventTypeDisconnect, PlayerID: "alice", ConnID: conn}
+		g.ProcessInputs()
+	}
+	check := func(t *testing.T, g *Game, wantConn uint64, wantPos Position) {
+		t.Helper()
+		p, ok := g.GetActivePlayerById("alice")
+		if !ok {
+			t.Fatal("alice not active after reconnect")
+		}
+		if p.ConnID != wantConn {
+			t.Errorf("ConnID=%d want %d", p.ConnID, wantConn)
+		}
+		if p.GetPosition() != wantPos {
+			t.Errorf("position %v want %v", p.GetPosition(), wantPos)
+		}
+		n := 0
+		for _, objs := range g.Level.posEntities {
+			for _, o := range objs {
+				if o.GetID() == "alice" {
+					n++
+				}
+			}
+		}
+		if n != 1 {
+			t.Errorf("alice appears %d times on the map, want 1", n)
+		}
+		entityConsistent(t, g.Level)
+	}
+
+	t.Run("new connect first, stale disconnect after", func(t *testing.T) {
+		g := newTestGame(t)
+		connect(g, 1)
+		p, _ := g.GetPlayerByID("alice")
+		pos := p.GetPosition()
+		connect(g, 2)    // takeover while still active
+		disconnect(g, 1) // late disconnect of the replaced socket: ignored
+		check(t, g, 2, pos)
+		if evs := drainServerEvents(g); len(evs) != 0 {
+			t.Errorf("stale disconnect produced server events %+v", evs)
+		}
+	})
+
+	t.Run("old disconnect first, new connect after", func(t *testing.T) {
+		g := newTestGame(t)
+		connect(g, 1)
+		p, _ := g.GetPlayerByID("alice")
+		pos := p.GetPosition()
+		disconnect(g, 1)
+		drainServerEvents(g)
+		connect(g, 2)
+		check(t, g, 2, pos)
+	})
+
+	t.Run("disconnect of the current connection still works", func(t *testing.T) {
+		g := newTestGame(t)
+		connect(g, 1)
+		addPlayerAt(t, g, "bob", Position{X: 30, Y: 30}) // keep the game alive
+		disconnect(g, 1)
+		if _, ok := g.GetActivePlayerById("alice"); ok {
+			t.Error("alice still active after her own connection disconnected")
+		}
+	})
+}
+
 func TestLevelCompleteMovesToIntermission(t *testing.T) {
 	g := newTestGame(t)
 	p := addPlayerAt(t, g, "alice", Position{X: 5, Y: 5})

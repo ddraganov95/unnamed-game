@@ -190,6 +190,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		Cancel:   cancel,
 		UserID:   userID,
 		PlayerID: playerID,
+		ConnID:   server.nextConnID.Add(1),
 	}
 	if err := server.RegisterPlayer(g, playerID, newConnection); err != nil {
 		// The upgrade already succeeded, so tell the client why with a close
