@@ -38,6 +38,29 @@ func TestInitSchemaIsIdempotent(t *testing.T) {
 }
 
 // Two servers booting at the same time both run InitSchema.
+// users holds login identity only; all stats live in user_stats.
+func TestUsersTableHasOnlyIdentityColumns(t *testing.T) {
+	d := pgtest.Open(t)
+	rows, err := d.Pool().Query(ctxT(t), `
+		SELECT column_name FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'users'
+		ORDER BY ordinal_position`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var cols []string
+	for rows.Next() {
+		var c string
+		rows.Scan(&c)
+		cols = append(cols, c)
+	}
+	want := []string{"user_id", "player_id", "last_login", "created_at"}
+	if strings.Join(cols, ",") != strings.Join(want, ",") {
+		t.Fatalf("users columns = %v, want %v", cols, want)
+	}
+}
+
 func TestInitSchemaConcurrentBoot(t *testing.T) {
 	d := pgtest.Open(t)
 	var wg sync.WaitGroup
@@ -467,11 +490,10 @@ func TestPlayerAchievementUnlock(t *testing.T) {
 	}
 }
 
-// The points trigger adds to users.total_achievement_points, but everything
-// that reads points (user_stats returned on disconnect, profile summary,
-// leaderboard) reads user_stats.total_achievement_points, which never changes.
+// Unlocking adds the achievement's points to user_stats (the points trigger
+// used to update users.total_achievement_points, a column that no longer
+// exists after the users -> user_stats migration, so every unlock failed).
 func TestAchievementPointsVisibleInStats(t *testing.T) {
-	testutil.KnownBug(t, "achievement points trigger updates users.total_achievement_points but stats/profile read user_stats.total_achievement_points")
 	d := pgtest.Open(t)
 	id := mustUser(t, d, "alice")
 	gob := achievementID(t, d, "gbl_slr_aprntc") // 10 points
