@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 type Player struct {
@@ -108,23 +109,21 @@ func (player *Player) UpdatePlayer(game *Game) {
 		return
 	}
 	keyPresses := player.KeyQueue
-	if player.PlayerState == StatePlaying {
-		if player.CurrentAttackSpeed > 0 {
-			player.CurrentAttackSpeed--
-		}
-		for _, key := range keyPresses {
-			if player.PlayerState == StateDisconnected {
-				break // quit earlier in this batch
-			}
+	if player.PlayerState == StatePlaying && player.CurrentAttackSpeed > 0 {
+		player.CurrentAttackSpeed--
+	}
+	// Dispatch each key by the state at that moment: an Enter earlier in the
+	// batch can switch to typing, and later keys must be typed, not run as commands.
+	for _, key := range keyPresses {
+		switch player.PlayerState {
+		case StateDisconnected:
+			player.KeyQueue = nil
+			return // quit earlier in this batch
+		case StatePlaying:
 			if function, exists := player.KeyBindings[unicode.ToLower(key)]; exists {
 				function(game)
 			}
-		}
-		player.KeyQueue = nil
-		return
-	}
-	if player.PlayerState == StateTyping {
-		for _, key := range keyPresses {
+		case StateTyping:
 			if function, exists := player.TypingKeyBindings[key]; exists {
 				function(game)
 			} else {
@@ -368,7 +367,8 @@ func (player *Player) GetCursor() string {
 }
 func (player *Player) RemoveLastByteMessage(game *Game) {
 	if len(player.MessageBuffer) > 0 {
-		player.MessageBuffer = player.MessageBuffer[:len(player.MessageBuffer)-1]
+		_, size := utf8.DecodeLastRuneInString(player.MessageBuffer)
+		player.MessageBuffer = player.MessageBuffer[:len(player.MessageBuffer)-size]
 	}
 }
 func (player *Player) SendMessage(game *Game) {

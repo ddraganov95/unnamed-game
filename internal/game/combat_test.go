@@ -3,7 +3,6 @@ package game
 import (
 	"testing"
 
-	"unnamed-game/internal/testutil"
 )
 
 func TestDealDamageIgnoresSameTeam(t *testing.T) {
@@ -172,7 +171,6 @@ func TestProjectileHitsEnemyAndWall(t *testing.T) {
 // entries from that same slice. Removing element i shifts the backing array,
 // so the next projectile is skipped and the last one is updated twice.
 func TestUpdateGameUpdatesEveryProjectileOnce(t *testing.T) {
-	testutil.KnownBug(t, "removing a projectile while iterating Level.Projectiles skips the next one and double-updates the last")
 	g := newTestGame(t)
 	p := addPlayerAt(t, g, "alice", Position{X: 5, Y: 20})
 	a := newArrow(p, Direction{X: 1, Y: 0}, 1) // expires on its first update
@@ -192,6 +190,30 @@ func TestUpdateGameUpdatesEveryProjectileOnce(t *testing.T) {
 	}
 	if c.GetPosition().X != 11 || c.CurrentMovementSpeed != c.MaxMovementSpeed {
 		t.Errorf("projectile c updated more than once: at %v speed %d", c.GetPosition(), c.CurrentMovementSpeed)
+	}
+}
+
+// A dead enemy removed during UpdateGame's loop over Level.Enemies must not
+// make its neighbours skip or double-update in that same tick.
+func TestUpdateGameUpdatesEveryEnemyOnce(t *testing.T) {
+	g := newTestGame(t)
+	addPlayerAt(t, g, "alice", Position{X: 5, Y: 20})
+	dead := addEnemyAt(g, "dead", EnemyGoblin, Position{X: 6, Y: 20})
+	b := addEnemyAt(g, "b", EnemyGoblin, Position{X: 7, Y: 20})
+	c := addEnemyAt(g, "c", EnemyGoblin, Position{X: 8, Y: 20})
+	dead.CurrentHealth = 0
+	// High attack cooldown so no enemy attacks; the only change we measure is
+	// the one LowerAttackSpeed(1) per update.
+	b.CurrentAttackSpeed = 100
+	c.CurrentAttackSpeed = 100
+
+	g.UpdateGame()
+
+	if b.CurrentAttackSpeed != 99 {
+		t.Errorf("enemy b was skipped: attack cooldown %d want 99", b.CurrentAttackSpeed)
+	}
+	if c.CurrentAttackSpeed != 99 {
+		t.Errorf("enemy c updated more than once: attack cooldown %d want 99", c.CurrentAttackSpeed)
 	}
 }
 

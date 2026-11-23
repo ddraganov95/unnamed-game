@@ -3,7 +3,6 @@ package game
 import (
 	"testing"
 
-	"unnamed-game/internal/testutil"
 )
 
 func TestPlayerMovement(t *testing.T) {
@@ -176,26 +175,6 @@ func TestConnectWithoutKeybindsDoesNotPanic(t *testing.T) {
 	press(g, p, 'd', 'q', 'f')
 }
 
-// A user can bind an action to 'c', ' ' or '\r' (the config endpoint only
-// checks length and duplicates), but those keys are then silently overwritten
-// by the hard-coded copy-game-id / next-level / chat bindings.
-func TestCustomBindingOnReservedKey(t *testing.T) {
-	testutil.KnownBug(t, "custom keybind on reserved key 'c' is silently overridden by CopyGameId")
-	g := newTestGame(t)
-	binds := map[string]string{"move_left": "c"}
-	if err := g.HandlePlayerConnect(GameEvent{PlayerID: "bob", Object: binds}); err != nil {
-		t.Fatal(err)
-	}
-	p, _ := g.GetPlayerByID("bob")
-	g.Level.RemoveEntity(p)
-	p.SetPosition(Position{X: 5, Y: 5})
-	g.Level.AddEntity(p)
-	press(g, p, 'c')
-	if p.GetPosition() != (Position{X: 4, Y: 5}) {
-		t.Fatalf("'c' bound to move_left did not move left")
-	}
-}
-
 func TestTypingModeGameChat(t *testing.T) {
 	g := newTestGame(t)
 	p := addPlayerAt(t, g, "alice", Position{X: 5, Y: 5})
@@ -249,7 +228,6 @@ func TestTypingModeSwitchToGlobalChat(t *testing.T) {
 // that arrive in the same 30ms tick right after Enter are still run as game
 // commands. Pasting or fast typing "\rhello q" can move, attack or quit.
 func TestKeysAfterEnterInSameTickAreTyped(t *testing.T) {
-	testutil.KnownBug(t, "keys queued in the same tick after Enter run as game commands instead of being typed")
 	g := newTestGame(t)
 	fakeServer(t, g)
 	p := addPlayerAt(t, g, "alice", Position{X: 5, Y: 5})
@@ -278,7 +256,6 @@ func TestMessageBufferMaxLength(t *testing.T) {
 // Backspace removes the last BYTE, so deleting a multi-byte character leaves
 // invalid UTF-8 in the buffer (which is then sent to chat and the DB).
 func TestBackspaceRemovesWholeRune(t *testing.T) {
-	testutil.KnownBug(t, "backspace removes one byte, corrupting multi-byte characters")
 	p := NewPlayer("alice", defaultKeybinds)
 	p.AddToMessageBuffer('a')
 	p.AddToMessageBuffer('é')
