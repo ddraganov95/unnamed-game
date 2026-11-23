@@ -510,19 +510,32 @@ func TestAchievementPointsVisibleInStats(t *testing.T) {
 	}
 }
 
-// Unlocking an already-unlocked achievement (e.g. the same player in two
-// games on two servers) raises a primary-key error instead of being a no-op.
+// A repeat unlock (leave-and-rejoin race where the next game loaded progress
+// before the unlock committed, or the same account on two servers) must be a
+// no-op: no error, no extra points, no second announcement.
 func TestPlayerAchievementUnlockIsIdempotent(t *testing.T) {
-	testutil.KnownBug(t, "player_achievement_unlock fails with a duplicate key error when the achievement is already unlocked")
 	d := pgtest.Open(t)
 	id := mustUser(t, d, "alice")
-	gob := achievementID(t, d, "gbl_slr_aprntc")
+	gob := achievementID(t, d, "gbl_slr_aprntc") // 10 points
 	ctx := ctxT(t)
+	conn := listen(t, d, "achievement_unlocked")
 	if err := d.CallFunction(ctx, "player_achievement_unlock", id, gob); err != nil {
 		t.Fatal(err)
 	}
+	if _, ok := waitNotification(t, conn, 2*time.Second); !ok {
+		t.Fatal("first unlock sent no announcement")
+	}
 	if err := d.CallFunction(ctx, "player_achievement_unlock", id, gob); err != nil {
 		t.Fatalf("second unlock: %v", err)
+	}
+	if n, ok := waitNotification(t, conn, 500*time.Millisecond); ok {
+		t.Errorf("second unlock announced again: %s", n.Payload)
+	}
+	var points, rows int
+	d.Pool().QueryRow(ctx, "SELECT total_achievement_points FROM user_stats WHERE user_id=$1", id).Scan(&points)
+	d.Pool().QueryRow(ctx, "SELECT count(*) FROM player_achievements WHERE user_id=$1", id).Scan(&rows)
+	if points != 10 || rows != 1 {
+		t.Errorf("after two unlocks: points=%d rows=%d, want 10 and 1", points, rows)
 	}
 }
 
