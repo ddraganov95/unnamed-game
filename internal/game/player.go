@@ -109,6 +109,9 @@ func (player *Player) UpdatePlayer(game *Game) {
 			player.CurrentAttackSpeed--
 		}
 		for _, key := range keyPresses {
+			if player.PlayerState == StateDisconnected {
+				break // quit earlier in this batch
+			}
 			if function, exists := player.KeyBindings[unicode.ToLower(key)]; exists {
 				function(game)
 			}
@@ -301,21 +304,18 @@ func (player *Player) QuitGame(game *Game) {
 		Key:       "GAME:default",
 		Amount:    0,
 	})
-	game.EventChan <- GameEvent{
-		Type:     EventTypePlayerQuit,
-		PlayerID: player.GetID(),
-	}
 	game.CreateLog("Quitting Game...")
+	// Runs inside the game loop (which holds game.Mu and is the only reader
+	// of EventChan), so handle it directly: sending to EventChan from here
+	// deadlocks the loop when the channel is full.
+	game.HandlePlayerQuit(player.GetID())
 }
 func (player *Player) GetNextLevel(game *Game) {
 	log.Printf("[DEBUG] %s ,Pressed Space!", player.GetID())
 	if !player.IsAlive() && game.State != StateGameIntermission {
 		return
 	}
-	game.EventChan <- GameEvent{
-		Type:     EventTypeGetNextLevel,
-		PlayerID: player.GetID(),
-	}
+	game.HandleNextLevel() // see QuitGame for why this is not sent to EventChan
 }
 func (player *Player) CopyGameId(game *Game) {
 	game.ServerEventChan <- ServerEvent{

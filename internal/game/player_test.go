@@ -165,6 +165,7 @@ func TestCustomKeybindsAndQuitKey(t *testing.T) {
 
 func TestConnectWithoutKeybindsDoesNotPanic(t *testing.T) {
 	g := newTestGame(t)
+	fakeServer(t, g) // 'q' quits the only player, which destroys the game
 	if err := g.HandlePlayerConnect(GameEvent{PlayerID: "nokeys", Object: nil}); err != nil {
 		t.Fatal(err)
 	}
@@ -250,6 +251,7 @@ func TestTypingModeSwitchToGlobalChat(t *testing.T) {
 func TestKeysAfterEnterInSameTickAreTyped(t *testing.T) {
 	testutil.KnownBug(t, "keys queued in the same tick after Enter run as game commands instead of being typed")
 	g := newTestGame(t)
+	fakeServer(t, g)
 	p := addPlayerAt(t, g, "alice", Position{X: 5, Y: 5})
 	press(g, p, '\r', 'd', 'q')
 	if p.MessageBuffer != "dq" {
@@ -258,10 +260,8 @@ func TestKeysAfterEnterInSameTickAreTyped(t *testing.T) {
 	if p.GetPosition() != (Position{X: 5, Y: 5}) {
 		t.Errorf("typed 'd' moved the player")
 	}
-	select {
-	case ev := <-g.EventChan:
-		t.Errorf("typed 'q' produced game event %v", ev.Type)
-	default:
+	if _, ok := g.GetActivePlayerById("alice"); !ok {
+		t.Errorf("typed 'q' quit the game")
 	}
 }
 

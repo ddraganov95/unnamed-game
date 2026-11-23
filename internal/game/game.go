@@ -318,6 +318,25 @@ func (game *Game) HandlePlayerDisconnect(playerID string) {
 	}
 }
 
+// HandlePlayerQuit disconnects the player and destroys the game when nobody
+// is left. Caller must hold game.Mu (it runs inside the game loop).
+func (game *Game) HandlePlayerQuit(playerID string) {
+	log.Printf("[DEBUG] Player %s quit", playerID)
+	game.HandlePlayerDisconnect(playerID)
+	if len(game.GetActivePlayers()) == 0 {
+		log.Printf("[DEBUG] Game destroy")
+		game.Destroy(DestroyReasonPlayerQuit.String())
+	}
+}
+
+// HandleNextLevel generates the next level and resumes play. Caller must
+// hold game.Mu (it runs inside the game loop).
+func (game *Game) HandleNextLevel() {
+	NewLevel(game)
+	game.EmptyMinutes = 0
+	game.State = StateGamePlaying
+}
+
 func (game *Game) GetPlayerByID(playerID string) (*Player, bool) {
 	for _, p := range game.Players {
 		if p.GetID() == playerID {

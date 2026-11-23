@@ -8,8 +8,6 @@ import (
 	"uuid"
 
 	"go.uber.org/goleak"
-
-	"unnamed-game/internal/testutil"
 )
 
 // startRealGame starts a game with all its goroutines (30ms loop, idle
@@ -146,8 +144,8 @@ func TestIdleTickConcurrentWithGameLoop(t *testing.T) {
 // faster than one tick drains it) the loop blocks on itself forever and the
 // whole game freezes for every player.
 func TestQuitWithFullEventChanDoesNotDeadlockLoop(t *testing.T) {
-	testutil.KnownBug(t, "game loop sends on its own EventChan while holding Mu (QuitGame/GetNextLevel); a full channel deadlocks the game")
 	g := newTestGame(t)
+	fakeServer(t, g) // last player quitting destroys the game
 	p := addPlayerAt(t, g, "alice", Position{X: 5, Y: 5})
 	for len(g.EventChan) < cap(g.EventChan) {
 		g.EventChan <- GameEvent{Type: EventTypeKey, PlayerID: "alice", Key: 'w'}
@@ -155,5 +153,39 @@ func TestQuitWithFullEventChanDoesNotDeadlockLoop(t *testing.T) {
 	ok := withTimeout(t, 2*time.Second, "UpdatePlayer('q') with full EventChan", func() { press(g, p, 'q') })
 	if !ok {
 		<-g.EventChan // unblock the stuck goroutine
+	}
+}
+
+// Same self-send problem for space (next level) during intermission.
+func TestNextLevelWithFullEventChanDoesNotDeadlockLoop(t *testing.T) {
+	g := newTestGame(t)
+	p := addPlayerAt(t, g, "alice", Position{X: 5, Y: 5})
+	g.State = StateGameIntermission
+	for len(g.EventChan) < cap(g.EventChan) {
+		g.EventChan <- GameEvent{Type: EventTypeKey, PlayerID: "alice", Key: 'w'}
+	}
+	ok := withTimeout(t, 2*time.Second, "UpdatePlayer(' ') with full EventChan", func() { press(g, p, ' ') })
+	if !ok {
+		<-g.EventChan
+		return
+	}
+	if g.State != StateGamePlaying {
+		t.Errorf("state=%v want playing after next level", g.State)
+	}
+}
+
+// Keys queued after 'q' in the same tick must not act on the player who
+// just quit.
+func TestKeysAfterQuitInSameTickAreIgnored(t *testing.T) {
+	g := newTestGame(t)
+	fakeServer(t, g)
+	addPlayerAt(t, g, "bob", Position{X: 20, Y: 5}) // keeps the game alive
+	p := addPlayerAt(t, g, "alice", Position{X: 5, Y: 5})
+	press(g, p, 'q', 'd')
+	if p.GetPosition() != (Position{X: 5, Y: 5}) {
+		t.Errorf("player moved after quitting: %v", p.GetPosition())
+	}
+	if _, ok := g.GetActivePlayerById("alice"); ok {
+		t.Errorf("alice still active after quit")
 	}
 }

@@ -51,21 +51,14 @@ EventLoop:
 				log.Printf("[DEBUG] Disco %s ", event.PlayerID)
 				game.HandlePlayerDisconnect(event.PlayerID)
 			case EventTypePlayerQuit:
-				log.Printf("[DEBUG] Player %s quit", event.PlayerID)
-				game.HandlePlayerDisconnect(event.PlayerID)
-				if len(game.GetActivePlayers()) == 0 {
-					log.Printf("[DEBUG] Game destroy")
-					game.Destroy(DestroyReasonPlayerQuit.String())
-				}
+				game.HandlePlayerQuit(event.PlayerID)
 			case EventTypeKey:
 				if receiver, ok := game.GetActivePlayerById(event.PlayerID); ok {
 					receiver.EnqueueKey(event.Key)
 					receiver.AFKMinutes = 0
 				}
 			case EventTypeGetNextLevel:
-				NewLevel(game)
-				game.EmptyMinutes = 0
-				game.State = StateGamePlaying
+				game.HandleNextLevel()
 			}
 		default:
 			break EventLoop
