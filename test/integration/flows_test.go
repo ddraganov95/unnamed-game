@@ -253,9 +253,7 @@ func TestSoak(t *testing.T) {
 	errs := make(chan error, players)
 	stop := time.Now().Add(time.Duration(secs) * time.Second)
 
-	// Note: 'c' (copy game id) is excluded: it crashes the process today
-	// (see TestConcurrentWebSocketWritesDoNotCrash).
-	keys := []string{"w", "a", "s", "d", "f", "e", " "}
+	keys := []string{"w", "a", "s", "d", "f", "e", " ", "c"}
 	for i := 0; i < players; i++ {
 		wg.Add(1)
 		go func(i int) {

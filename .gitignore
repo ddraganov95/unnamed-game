@@ -1,6 +1,6 @@
 *.exe
 *.env
-server
+/server
 
 # IDE and OS files
 .vscode/

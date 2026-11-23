@@ -54,7 +54,24 @@ type GameWSConnection struct {
 	Conn     *websocket.Conn
 	UserID   string
 	PlayerID string
+	// writeMu serializes writes: gorilla/websocket allows only one
+	// concurrent writer and panics otherwise. Always write through
+	// WriteText/WriteJSON, never Conn.Write* directly.
+	writeMu sync.Mutex
 }
+
+func (c *GameWSConnection) WriteText(s string) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.Conn.WriteMessage(websocket.TextMessage, []byte(s))
+}
+
+func (c *GameWSConnection) WriteJSON(v any) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.Conn.WriteJSON(v)
+}
+
 type ChatWSConnection struct {
 	Ctx      context.Context
 	Cancel   context.CancelFunc

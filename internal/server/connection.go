@@ -59,7 +59,7 @@ func (server *Server) RegisterPlayer(g *game.Game, playerID string, conn *GameWS
 	return nil
 }
 
-func (server *Server) streamFrames(g *game.Game, playerID string, conn *websocket.Conn) {
+func (server *Server) streamFrames(g *game.Game, playerID string, conn *GameWSConnection) {
 	g.Mu.RLock()
 	var playerChan chan string
 	for _, p := range g.Players {
@@ -79,7 +79,7 @@ func (server *Server) streamFrames(g *game.Game, playerID string, conn *websocke
 		case <-g.DestroyChan:
 			return
 		case frame := <-playerChan:
-			if err := conn.WriteMessage(websocket.TextMessage, []byte(frame)); err != nil {
+			if err := conn.WriteText(frame); err != nil {
 				return
 			}
 		}
@@ -123,14 +123,15 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			server.mu.Unlock()
 			return
 		case game.EventTypeCopyGame:
-			server.mu.Lock()
-			if connection, exists := server.activeConns[event.PlayerID]; exists {
-				connection.Conn.WriteJSON(OutboundWSMessage{
+			server.mu.RLock()
+			connection, exists := server.activeConns[event.PlayerID]
+			server.mu.RUnlock()
+			if exists {
+				connection.WriteJSON(OutboundWSMessage{
 					Type:    "copy_clipboard",
 					Payload: event.Value,
 				})
 			}
-			server.mu.Unlock()
 		case game.EventTypeAchievementUnlocked:
 			server.mu.RLock()
 			userID, exists := server.playerUsers[event.PlayerID]
@@ -214,7 +215,7 @@ func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string)
 	} else {
 		log.Printf("[DB] Successfully saved session summary for %s\n", playerID)
 		if exists {
-			connection.Conn.WriteJSON(map[string]any{
+			connection.WriteJSON(map[string]any{
 				"type":         "session_summary",
 				"player_id":    playerID,
 				"user_stats":   user_stats,

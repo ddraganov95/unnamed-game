@@ -197,7 +197,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer server.DisconnectPlayer(g, playerID, newConnection)
 
-	go server.streamFrames(g, playerID, conn)
+	go server.streamFrames(g, playerID, newConnection)
 	fmt.Printf("Player %s connected and spawned!\n", playerID)
 	server.readPlayerInputs(g, playerID, conn)
 }

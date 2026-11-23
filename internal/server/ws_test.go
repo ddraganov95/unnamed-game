@@ -198,7 +198,6 @@ func TestQuitWhileSpammingInputFinalizesGame(t *testing.T) {
 // crashing the whole server process. Runs in a subprocess so the crash only
 // fails this test.
 func TestConcurrentWebSocketWritesDoNotCrash(t *testing.T) {
-	testutil.KnownBug(t, "copy_clipboard/session_summary writes race with streamFrames on the same websocket (gorilla panics: concurrent write)")
 	if os.Getenv("SUBPROCESS_CONCURRENT_WRITE") == "1" {
 		concurrentWriteScenario(t)
 		return
