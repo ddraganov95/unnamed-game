@@ -174,6 +174,25 @@ func TestNextLevelWithFullEventChanDoesNotDeadlockLoop(t *testing.T) {
 	}
 }
 
+func TestSendEventAfterDestroyDoesNotBlock(t *testing.T) {
+	g := newTestGame(t)
+	fakeServer(t, g)
+	for len(g.EventChan) < cap(g.EventChan) {
+		g.EventChan <- GameEvent{Type: EventTypeKey, PlayerID: "x", Key: 'w'}
+	}
+	withTimeout(t, 3*time.Second, "Destroy", func() { g.Destroy("test") })
+	var sent bool
+	withTimeout(t, 2*time.Second, "SendEvent on destroyed game", func() {
+		sent = g.SendEvent(GameEvent{Type: EventTypeDisconnect, PlayerID: "x"})
+	})
+	if sent {
+		t.Error("SendEvent reported success on a destroyed game")
+	}
+	if err := g.Validate("bob"); err == nil {
+		t.Error("Validate accepted a player into a destroyed game")
+	}
+}
+
 // Keys queued after 'q' in the same tick must not act on the player who
 // just quit.
 func TestKeysAfterQuitInSameTickAreIgnored(t *testing.T) {

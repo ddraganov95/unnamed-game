@@ -375,7 +375,38 @@ func (game *Game) GetActivePlayerById(playerId string) (*Player, bool) {
 	return nil, false
 }
 
+// IsDestroyed reports whether Destroy has been called.
+func (game *Game) IsDestroyed() bool {
+	select {
+	case <-game.DestroyChan:
+		return true
+	default:
+		return false
+	}
+}
+
+// SendEvent queues an event for the game loop. It waits while the queue is
+// full (the loop drains it every tick) but gives up and returns false once
+// the game is destroyed, since nothing reads EventChan after that. Code
+// outside the game loop must use this instead of sending to EventChan.
+func (game *Game) SendEvent(ev GameEvent) bool {
+	select {
+	case <-game.DestroyChan:
+		return false
+	default:
+	}
+	select {
+	case game.EventChan <- ev:
+		return true
+	case <-game.DestroyChan:
+		return false
+	}
+}
+
 func (game *Game) Validate(playerid string) error {
+	if game.IsDestroyed() {
+		return fmt.Errorf("Game has ended")
+	}
 	if game.State == StateGameOver {
 		return fmt.Errorf("Game is over!")
 	}

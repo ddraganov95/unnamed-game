@@ -169,7 +169,6 @@ func TestReconnectKeepsNewSessionActive(t *testing.T) {
 // in DisconnectPlayer sending to that full channel, so the game is never
 // finalized in the DB nor removed from activeGames.
 func TestQuitWhileSpammingInputFinalizesGame(t *testing.T) {
-	testutil.KnownBug(t, "quitting while input is still arriving blocks the server listener on a full EventChan; game never finalized")
 	env := newTestEnv(t)
 	c := env.newClient("alice")
 	id := c.createGame()
@@ -189,6 +188,44 @@ func TestQuitWhileSpammingInputFinalizesGame(t *testing.T) {
 	env.db.Pool().QueryRow(context.Background(), "SELECT status FROM games WHERE game_id=$1", id).Scan(&status)
 	if status != "inactive" {
 		t.Fatalf("game status in DB = %q, want inactive", status)
+	}
+}
+
+// A game that has been destroyed (but whose cleanup has not finished, or is
+// stuck) must refuse joins and websocket registration instead of hanging on
+// its EventChan, which nothing reads anymore.
+func TestDestroyedGameRejectsJoinAndConnect(t *testing.T) {
+	env := newTestEnv(t)
+	alice := env.newClient("alice")
+	id := alice.createGame()
+	g, ok := env.game(id)
+	if !ok {
+		t.Fatal("game not active")
+	}
+	// Close DestroyChan without running the server-side cleanup, so the game
+	// is still in activeGames (the window in which the bug used to hang).
+	g.Mu.Lock()
+	close(g.DestroyChan)
+	g.Mu.Unlock()
+	for len(g.EventChan) < cap(g.EventChan) {
+		g.EventChan <- game.GameEvent{Type: game.EventTypeKey, PlayerID: "x", Key: 'w'}
+	}
+
+	bob := env.newClient("bob")
+	if resp := bob.join(id); resp.StatusCode != 503 {
+		t.Errorf("join destroyed game: status %d want 503", resp.StatusCode)
+	}
+
+	conn := &GameWSConnection{Ctx: context.Background(), UserID: bob.userID.String(), PlayerID: "bob"}
+	errc := make(chan error, 1)
+	go func() { errc <- env.srv.RegisterPlayer(g, "bob", conn) }()
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Error("RegisterPlayer on destroyed game returned nil")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("RegisterPlayer hung on a destroyed game")
 	}
 }
 

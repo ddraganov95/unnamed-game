@@ -12,6 +12,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var errGameEnded = errors.New("game has ended")
+
 func (server *Server) InitializeConnection(g *game.Game, username string) error {
 	server.mu.Lock()
 	oldConn, exists := server.activeConns[username]
@@ -42,15 +44,22 @@ func (server *Server) RegisterPlayer(g *game.Game, playerID string, conn *GameWS
 	}
 
 	respChan := make(chan error, 1)
-	g.EventChan <- game.GameEvent{
+	if !g.SendEvent(game.GameEvent{
 		Type:     game.EventTypeConnect,
 		PlayerID: playerID,
 		RespChan: respChan,
 		Object:   userConfig.Keybinds,
+	}) {
+		return errGameEnded
 	}
 
-	if err := <-respChan; err != nil {
-		return err
+	select {
+	case err := <-respChan:
+		if err != nil {
+			return err
+		}
+	case <-g.DestroyChan:
+		return errGameEnded
 	}
 
 	server.mu.Lock()
@@ -94,10 +103,12 @@ func (server *Server) readPlayerInputs(g *game.Game, playerID string, conn *webs
 		}
 
 		if len(msg) > 0 {
-			g.EventChan <- game.GameEvent{
+			if !g.SendEvent(game.GameEvent{
 				PlayerID: playerID,
 				Type:     game.EventTypeKey,
 				Key:      rune(msg[0]),
+			}) {
+				return // game ended
 			}
 		}
 	}
@@ -235,10 +246,10 @@ func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn
 
 	targetConn.Conn.Close()
 
-	g.EventChan <- game.GameEvent{
+	g.SendEvent(game.GameEvent{ // no-op if the game already ended
 		Type:     game.EventTypeDisconnect,
 		PlayerID: playerID,
-	}
+	})
 }
 func (s *Server) processAndSaveEvents(g *game.Game, event game.ServerEvent) {
 	events, ok := event.Object.([]game.Event)
