@@ -45,7 +45,6 @@ type Server struct {
 	db             *db.Database
 	Mux            *http.ServeMux
 	httpServer     *http.Server
-	globalChat     chan string
 	dbWriteChan    chan dbWriteTask
 	nextConnID     atomic.Uint64
 }
@@ -146,7 +145,6 @@ func NewServerWithDB(ctx context.Context, database *db.Database, config ServerCo
 		playerSessions: make(map[string]uuid.UUID),
 		lobbyConns:     make(map[string]*ChatWSConnection),
 		playerUsers:    make(map[string]uuid.UUID),
-		globalChat:     make(chan string, game.MaxChatHistory),
 		dbWriteChan:    make(chan dbWriteTask, DBWriteQueueSize),
 		Mux:            http.NewServeMux(),
 		db:             database,

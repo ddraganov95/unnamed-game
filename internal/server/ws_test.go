@@ -365,8 +365,29 @@ func TestLobbyChatTwoTabsSamePlayer(t *testing.T) {
 // Every game reads global chat from the single shared server.globalChat
 // channel, so each message is consumed by exactly one game's PollChat; all
 // other games never see it.
+// Global messages sent while no game exists must not pile up and be replayed
+// as if new in the next game created (they used to sit in the shared
+// channel's buffer).
+func TestGlobalChatNotReplayedInNewGame(t *testing.T) {
+	env := newTestEnv(t)
+	for i := 0; i < 5; i++ {
+		env.srv.BroadcastGlobalMessage(fmt.Sprintf("old %d", i))
+	}
+	c := env.newClient("alice")
+	id := c.createGame()
+	c.mustDial("/ws").waitFor(t, defaultWait, "frame", isFrame)
+	g, _ := env.game(id)
+	time.Sleep(200 * time.Millisecond) // several ticks of PollChat
+	g.Mu.Lock()
+	defer g.Mu.Unlock()
+	for _, m := range g.ChatHistory {
+		if strings.Contains(m, "old ") {
+			t.Fatalf("new game replayed a message sent before it existed: %q", m)
+		}
+	}
+}
+
 func TestGlobalChatReachesEveryGame(t *testing.T) {
-	testutil.KnownBug(t, "global chat uses one shared channel; each message reaches only one game")
 	env := newTestEnv(t)
 	var games []*game.Game
 	for i := 0; i < 3; i++ {

@@ -45,6 +45,9 @@ func InitializeGame() *Game {
 		State:       StateGamePlaying,
 		DestroyChan: make(chan struct{}),
 		GameChat:    make(chan string, MaxChatHistory),
+		// Each game has its own global chat inbox; the server fans every
+		// message out to all games (see DeliverGlobalChat).
+		GlobalChat: make(chan string, MaxChatHistory),
 	}
 	game.InitFrame()
 	InitEventChan(game)
@@ -66,9 +69,8 @@ func (game *Game) goSafe(fn func()) {
 		fn()
 	}()
 }
-func NewGame(gameId uuid.UUID, globalChat chan string, achievementCatalog *AchievementCatalog) *Game {
+func NewGame(gameId uuid.UUID, achievementCatalog *AchievementCatalog) *Game {
 	game := InitializeGame()
-	game.GlobalChat = globalChat
 	game.GameId = gameId
 	game.AchievementEngine = NewAchievementEngine(achievementCatalog, game.DestroyChan, game.ServerEventChan)
 	game.goSafe(game.StartGame)                             // Start the game loop
@@ -699,6 +701,18 @@ func (game *Game) PollChat() {
 		default:
 			return
 		}
+	}
+}
+
+// DeliverGlobalChat queues a global chat message for this game without
+// blocking; it returns false if the game's inbox is full (message dropped).
+// Safe to call from any goroutine.
+func (game *Game) DeliverGlobalChat(msg string) bool {
+	select {
+	case game.GlobalChat <- msg:
+		return true
+	default:
+		return false
 	}
 }
 

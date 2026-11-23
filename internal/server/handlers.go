@@ -49,7 +49,7 @@ func (server *Server) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetGameID := uuid.NewV7()
-	targetGame := game.NewGame(targetGameID, server.globalChat, server.achievementCat)
+	targetGame := game.NewGame(targetGameID, server.achievementCat)
 
 	if err := targetGame.Validate(playerID); err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)

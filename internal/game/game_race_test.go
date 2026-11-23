@@ -14,7 +14,7 @@ import (
 // ticker, achievement processor) plus a stand-in for the server listener.
 func startRealGame(t *testing.T) *Game {
 	t.Helper()
-	g := NewGame(uuid.NewV7(), make(chan string, MaxChatHistory), testCatalog(t))
+	g := NewGame(uuid.NewV7(), testCatalog(t))
 	fakeServer(t, g)
 	return g
 }
