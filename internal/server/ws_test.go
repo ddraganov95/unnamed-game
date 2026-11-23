@@ -294,6 +294,36 @@ func TestLobbyChatHistoryAndBroadcast(t *testing.T) {
 	}
 }
 
+// Lobby chat goes ws -> DB -> NOTIFY -> server LISTEN connection -> broadcast.
+// After that LISTEN connection is killed (DB restart, network blip) chat must
+// come back on its own.
+func TestLobbyChatRecoversAfterListenConnectionDrops(t *testing.T) {
+	env := newTestEnv(t)
+	a := env.newClient("alice")
+	wa := a.mustDial("/ws/global-chat")
+	time.Sleep(300 * time.Millisecond) // listener connects asynchronously at boot
+	wa.send(t, "before")
+	wa.waitFor(t, defaultWait, "chat before the drop", func(m string) bool { return m == "[alice]: before" })
+
+	if _, err := env.db.Pool().Exec(context.Background(), `
+		SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+		WHERE datname = current_database() AND pid <> pg_backend_pid() AND query ILIKE 'LISTEN%'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Messages sent while the listener is reconnecting are lost (NOTIFY is
+	// not persisted), so keep sending until one comes through.
+	deadline := time.Now().Add(8 * time.Second)
+	for i := 0; time.Now().Before(deadline); i++ {
+		msg := fmt.Sprintf("after %d", i)
+		wa.send(t, msg)
+		if _, ok := wa.tryWaitFor(500*time.Millisecond, func(m string) bool { return m == "[alice]: "+msg }); ok {
+			return
+		}
+	}
+	t.Fatal("lobby chat did not recover after the LISTEN connection was dropped")
+}
+
 func TestLobbyChatSlowClientDoesNotBlockBroadcast(t *testing.T) {
 	env := newTestEnv(t)
 	slow := env.newClient("slow")

@@ -768,23 +768,32 @@ func TestListenToDBEventsDeliversAndStops(t *testing.T) {
 	}
 }
 
-// ListenToDBEvents logs "Reconnecting in 2s..." but has no loop: after a
-// dropped connection it returns and the server stops receiving global chat
-// and achievement announcements until restart.
+// If the LISTEN connection drops, the listener must reconnect, every time
+// (global chat and achievement announcements depend on it). Before the fix
+// it logged "Reconnecting in 2s..." and then returned for good.
 func TestListenToDBEventsReconnects(t *testing.T) {
-	testutil.KnownBug(t, "ListenToDBEvents never reconnects after the LISTEN connection drops (no retry loop)")
 	d := pgtest.Open(t)
-	received, _, _ := startListener(t, d)
+	received, cancel, done := startListener(t, d)
 	if !notifyUntilReceived(t, d, received, "before", 5*time.Second) {
 		t.Fatal("listener never received the first notification")
 	}
-	_, err := d.Pool().Exec(ctxT(t), `
-		SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-		WHERE datname = current_database() AND pid <> pg_backend_pid() AND query ILIKE 'LISTEN%'`)
-	if err != nil {
-		t.Fatal(err)
+	for i := 1; i <= 3; i++ {
+		_, err := d.Pool().Exec(ctxT(t), `
+			SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+			WHERE datname = current_database() AND pid <> pg_backend_pid() AND query ILIKE 'LISTEN%'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload := fmt.Sprintf("after drop %d", i)
+		if !notifyUntilReceived(t, d, received, payload, 8*time.Second) {
+			t.Fatalf("listener did not recover after drop %d", i)
+		}
 	}
-	if !notifyUntilReceived(t, d, received, "after", 8*time.Second) {
-		t.Fatal("listener did not recover after its connection was terminated")
+	// And it still stops promptly on shutdown after reconnecting.
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("listener did not stop after context cancel")
 	}
 }

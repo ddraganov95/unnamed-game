@@ -197,34 +197,55 @@ func (db *Database) CallFunction(ctx context.Context, name string, args ...any) 
 
 type NotificationHandler func(channel, payload string)
 
+const (
+	listenRetryMin = 1 * time.Second
+	listenRetryMax = 30 * time.Second
+)
+
+// ListenToDBEvents runs until ctx is cancelled. If the LISTEN connection
+// drops (DB restart, network blip) it reconnects with exponential backoff
+// (1s..30s, reset once a connection is established). Notifications sent while
+// disconnected are lost: NOTIFY is not persisted by Postgres.
 func (db *Database) ListenToDBEvents(ctx context.Context, channels []string, handler NotificationHandler) {
-	if err := db.listenLoop(ctx, channels, handler); err != nil {
+	delay := listenRetryMin
+	for {
+		connected, err := db.listenLoop(ctx, channels, handler)
 		if ctx.Err() != nil {
 			log.Println("[DB LISTEN] Shutdown signal received. Stopping listener.")
 			return
 		}
-
-		// If it was a network failure, log and retry with a backoff delay
-		log.Printf("[DB ERROR] Listener connection lost: %v. Reconnecting in 2s...", err)
-
+		if connected {
+			delay = listenRetryMin // it worked for a while; retry quickly
+		}
+		log.Printf("[DB ERROR] Listener connection lost: %v. Reconnecting in %v...", err, delay)
 		select {
-		case <-time.After(2 * time.Second):
+		case <-time.After(delay):
 		case <-ctx.Done():
+			log.Println("[DB LISTEN] Shutdown signal received. Stopping listener.")
 			return
 		}
+		delay = min(delay*2, listenRetryMax)
 	}
 }
-func (db *Database) listenLoop(ctx context.Context, channels []string, handler NotificationHandler) error {
+
+// listenLoop holds one LISTEN connection until it fails. connected reports
+// whether it got as far as listening on all channels.
+func (db *Database) listenLoop(ctx context.Context, channels []string, handler NotificationHandler) (connected bool, err error) {
 	connConfig := db.pool.Config().ConnConfig
 	conn, err := pgx.ConnectConfig(ctx, connConfig)
 	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+		return false, fmt.Errorf("failed to connect: %w", err)
 	}
-	defer conn.Close(ctx)
+	defer func() {
+		// ctx may already be cancelled; give Close its own short deadline.
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		conn.Close(closeCtx)
+	}()
 
 	for _, channel := range channels {
 		if _, err := conn.Exec(ctx, fmt.Sprintf("LISTEN %s", pgx.Identifier{channel}.Sanitize())); err != nil {
-			return fmt.Errorf("failed to listen on channel %s: %w", channel, err)
+			return false, fmt.Errorf("failed to listen on channel %s: %w", channel, err)
 		}
 	}
 
@@ -234,7 +255,7 @@ func (db *Database) listenLoop(ctx context.Context, channels []string, handler N
 		// WaitForNotification unblocks instantly when ctx is canceled
 		notification, err := conn.WaitForNotification(ctx)
 		if err != nil {
-			return err // Return to outer loop to determine if we exit or reconnect
+			return true, err // outer loop decides: exit or reconnect
 		}
 
 		handler(notification.Channel, notification.Payload)
