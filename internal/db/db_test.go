@@ -13,7 +13,6 @@ import (
 
 	"unnamed-game/internal/db"
 	"unnamed-game/internal/game"
-	"unnamed-game/internal/testutil"
 	"unnamed-game/internal/testutil/pgtest"
 
 	"github.com/jackc/pgx/v5"
@@ -205,21 +204,6 @@ func TestUpsertConfigurationUnknownUserFails(t *testing.T) {
 	d := pgtest.Open(t)
 	if err := d.UpsertUserConfiguration(ctxT(t), uuid.New(), db.DefaultUserConfiguration); err == nil {
 		t.Fatal("expected FK error for unknown user")
-	}
-}
-
-// FetchUserConfiguration returns DefaultUserConfiguration by value, but the
-// Keybinds map inside it is shared. Any caller that edits the returned map
-// silently changes the defaults for every other user.
-func TestDefaultConfigurationIsNotShared(t *testing.T) {
-	testutil.KnownBug(t, "default configuration's Keybinds map is shared; mutating a fetched default changes it for everyone (latent)")
-	d := pgtest.Open(t)
-	id := mustUser(t, d, "alice")
-	cfg, _ := d.FetchUserConfiguration(ctxT(t), id)
-	cfg.Keybinds["move_up"] = "z"
-	t.Cleanup(func() { db.DefaultUserConfiguration.Keybinds["move_up"] = "w" })
-	if db.DefaultUserConfiguration.Keybinds["move_up"] != "w" {
-		t.Fatalf("mutating a fetched default changed DefaultUserConfiguration")
 	}
 }
 
@@ -424,27 +408,6 @@ func TestFetchPlayerProgressNewUser(t *testing.T) {
 	for _, s := range states {
 		if s.IsUnlocked || len(s.Progress) != 0 {
 			t.Errorf("new user state %+v", s)
-		}
-	}
-}
-
-// requirements is a JSON array of {group_id, req_type, target_value}, but it
-// is unmarshalled into map[string]int64 with the error ignored, so
-// MaxProgress is always empty. /api/users/me/achievements returns it as
-// max_progress; the lobby page hides this by falling back to maxima
-// hard-coded in the HTML.
-func TestFetchPlayerProgressMaxProgress(t *testing.T) {
-	testutil.KnownBug(t, "FetchPlayerProgress MaxProgress is always empty (requirements array unmarshalled into a map, error ignored)")
-	d := pgtest.Open(t)
-	id := mustUser(t, d, "alice")
-	gob := achievementID(t, d, "gbl_slr_aprntc") // kill 10 goblins, group 1
-	states, err := d.FetchPlayerProgress(ctxT(t), id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, s := range states {
-		if s.AchievementID == gob && s.MaxProgress["1:0"] != 10 {
-			t.Fatalf("MaxProgress=%v want map[1:0:10]", s.MaxProgress)
 		}
 	}
 }

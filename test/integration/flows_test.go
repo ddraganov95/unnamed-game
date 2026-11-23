@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"unnamed-game/internal/server"
-	"unnamed-game/internal/testutil"
 
 	"go.uber.org/goleak"
 )
@@ -195,7 +194,6 @@ func TestGracefulShutdown(t *testing.T) {
 // On shutdown the active games are simply abandoned: their goroutines keep
 // running until the process exits and their DB rows stay 'active' forever.
 func TestShutdownFinalizesActiveGames(t *testing.T) {
-	testutil.KnownBug(t, "server shutdown does not end active games; their DB rows stay 'active'")
 	d := openDB(t)
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	_, port, _ := net.SplitHostPort(l.Addr().String())
