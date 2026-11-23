@@ -106,32 +106,38 @@ func (game *Game) StartGame() {
 			log.Println("[DEBUG] StartGame loop terminated.")
 			return
 		case <-ticker.C:
-			game.Mu.Lock()
-			game.ProcessInputs()
-			game.PollChat()
-			for _, player := range game.GetActivePlayers() {
-				player.UpdatePlayer(game)
-			}
-			if game.State == StateGamePlaying {
-				game.UpdateGame()
-			}
-			game.Mu.Unlock()
+			game.Tick()
+		}
+	}
+}
 
-			for _, player := range game.GetActivePlayers() {
-				var renderedFrame string
-				switch game.State {
-				case StateGamePlaying:
-					renderedFrame = game.DrawLevelForPlayer(game.Level, player)
-				case StateGameIntermission:
-					renderedFrame = game.DrawLevelIntermissionForPlayer(game.Level, player)
-				case StateGameOver:
-					renderedFrame = game.DrawGameOverForPlayer(game.Level, player)
-				}
-				select {
-				case player.DisplayChan <- renderedFrame:
-				default:
-				}
-			}
+// Tick runs one iteration of the game loop: process inputs and chat, update
+// players and the level, then render and push a frame to every active player.
+func (game *Game) Tick() {
+	game.Mu.Lock()
+	game.ProcessInputs()
+	game.PollChat()
+	for _, player := range game.GetActivePlayers() {
+		player.UpdatePlayer(game)
+	}
+	if game.State == StateGamePlaying {
+		game.UpdateGame()
+	}
+	game.Mu.Unlock()
+
+	for _, player := range game.GetActivePlayers() {
+		var renderedFrame string
+		switch game.State {
+		case StateGamePlaying:
+			renderedFrame = game.DrawLevelForPlayer(game.Level, player)
+		case StateGameIntermission:
+			renderedFrame = game.DrawLevelIntermissionForPlayer(game.Level, player)
+		case StateGameOver:
+			renderedFrame = game.DrawGameOverForPlayer(game.Level, player)
+		}
+		select {
+		case player.DisplayChan <- renderedFrame:
+		default:
 		}
 	}
 }
@@ -159,41 +165,49 @@ func (game *Game) HandleEmptyGame() {
 			log.Println("[DEBUG] HandleEmptyGame loop terminated.")
 			return
 		case <-ticker.C:
-			game.Mu.Lock()
-			log.Printf("[DEBUG] AFK TIMER TICK!")
-			for _, p := range game.Players {
-				p.AFKMinutes++
-				log.Printf("[DEBUG] Player %s afk for %d minute(s)", p.GetID(), p.AFKMinutes)
-				if p.AFKMinutes >= PlayerAllowedAFKMins {
-					game.AchievementEngine.PublishEvent(AchievementEvent{
-						PlayerIDs: game.GetActiveAndAlivePlayerID(),
-						Key:       "GAME:default",
-						Amount:    0,
-					})
-					game.HandlePlayerDisconnect(p.GetID())
-				}
+			if game.IdleTick() {
+				game.Destroy(DestroyReasonIdleCheck.String())
+				return
 			}
-			if len(game.GetActivePlayers()) == 0 || game.State != StateGamePlaying {
-				game.EmptyMinutes++
-				log.Printf("[DEBUG] Game empty for %d minute(s)", game.EmptyMinutes)
-				game.CreateLog("[SERVER] Game ending in %d minute(s)", StopGameAfterIdleMinutes-game.EmptyMinutes)
-				game.AchievementEngine.PublishEvent(AchievementEvent{
-					PlayerIDs: game.GetActiveAndAlivePlayerID(),
-					Key:       "GAME:default",
-					Amount:    0,
-				})
-				if game.EmptyMinutes >= StopGameAfterIdleMinutes {
-					log.Println("[DEBUG] Idle threshold reached via ticker. Shutting down game.")
-					game.Mu.Unlock()
-					game.Destroy(DestroyReasonIdleCheck.String())
-					return
-				}
-			} else {
-				game.EmptyMinutes = 0
-			}
-			game.Mu.Unlock()
 		}
 	}
+}
+
+// IdleTick runs one minute of AFK/idle bookkeeping. It returns true when the
+// game has been idle long enough that the caller should destroy it.
+func (game *Game) IdleTick() bool {
+	game.Mu.Lock()
+	defer game.Mu.Unlock()
+	log.Printf("[DEBUG] AFK TIMER TICK!")
+	for _, p := range game.Players {
+		p.AFKMinutes++
+		log.Printf("[DEBUG] Player %s afk for %d minute(s)", p.GetID(), p.AFKMinutes)
+		if p.AFKMinutes >= PlayerAllowedAFKMins {
+			game.AchievementEngine.PublishEvent(AchievementEvent{
+				PlayerIDs: game.GetActiveAndAlivePlayerID(),
+				Key:       "GAME:default",
+				Amount:    0,
+			})
+			game.HandlePlayerDisconnect(p.GetID())
+		}
+	}
+	if len(game.GetActivePlayers()) == 0 || game.State != StateGamePlaying {
+		game.EmptyMinutes++
+		log.Printf("[DEBUG] Game empty for %d minute(s)", game.EmptyMinutes)
+		game.CreateLog("[SERVER] Game ending in %d minute(s)", StopGameAfterIdleMinutes-game.EmptyMinutes)
+		game.AchievementEngine.PublishEvent(AchievementEvent{
+			PlayerIDs: game.GetActiveAndAlivePlayerID(),
+			Key:       "GAME:default",
+			Amount:    0,
+		})
+		if game.EmptyMinutes >= StopGameAfterIdleMinutes {
+			log.Println("[DEBUG] Idle threshold reached via ticker. Shutting down game.")
+			return true
+		}
+	} else {
+		game.EmptyMinutes = 0
+	}
+	return false
 }
 
 type DestroyReason int

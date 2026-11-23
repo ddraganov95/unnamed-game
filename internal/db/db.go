@@ -40,8 +40,11 @@ type copyExecutor interface {
 }
 
 func NewDatabase() (*Database, error) {
-	config := LoadConfig()
-	ctx := context.Background()
+	return NewDatabaseFromConfig(context.Background(), LoadConfig())
+}
+
+// NewDatabaseFromConfig connects with an explicit config, pings, and applies the schema.
+func NewDatabaseFromConfig(ctx context.Context, config DBConfig) (*Database, error) {
 
 	poolConfig, err := pgxpool.ParseConfig(config.ConnString())
 	if err != nil {
@@ -67,6 +70,12 @@ func NewDatabase() (*Database, error) {
 	log.Println("[DB] Successfully connected and updated USERS table schema.")
 	return &Database{pool: pool}, nil
 }
+
+// Pool exposes the underlying pool (used by tests for direct assertions).
+func (db *Database) Pool() *pgxpool.Pool { return db.pool }
+
+// Close releases all pool connections.
+func (db *Database) Close() { db.pool.Close() }
 func InitSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {

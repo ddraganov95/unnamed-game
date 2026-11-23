@@ -88,7 +88,12 @@ func NewServer(ctx context.Context) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	return NewServerWithDB(ctx, database, NewConfig())
+}
 
+// NewServerWithDB builds a server on an already-connected database. NewServer
+// uses it for production; tests use it to point the server at a test database.
+func NewServerWithDB(ctx context.Context, database *db.Database, config ServerConfig) (*Server, error) {
 	// Set a strict 5-second deadline for server startup I/O
 	bootCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -121,7 +126,7 @@ func NewServer(ctx context.Context) (*Server, error) {
 		Mux:            http.NewServeMux(),
 		db:             database,
 		achievementCat: catalog,
-		serverConfig:   NewConfig(),
+		serverConfig:   config,
 	}
 	go srv.dbWriteWorker(ctx)
 	game.InitGameRegistries()
@@ -129,6 +134,22 @@ func NewServer(ctx context.Context) (*Server, error) {
 	go database.ListenToDBEvents(ctx, events, srv.handleDBEvent)
 	return srv, nil
 }
+// RegisterRoutes mounts every API, websocket and static-file route on Mux.
+func (srv *Server) RegisterRoutes(webDir string) {
+	srv.Mux.HandleFunc("POST /api/users", srv.HandleCreateUser)
+	srv.Mux.HandleFunc("GET /api/users/me", srv.HandleGetSelf)
+	srv.Mux.HandleFunc("GET /api/users/me/achievements", srv.HandleGetSelfAchievements)
+	srv.Mux.HandleFunc("GET /api/users/me/leaderboard", srv.HandleGetSelfLeaderboard)
+	srv.Mux.HandleFunc("GET /api/users/me/config", srv.HandleGetSelfConfig)
+	srv.Mux.HandleFunc("PUT /api/users/me/config", srv.HandleUpdateSelfConfig)
+	srv.Mux.HandleFunc("POST /api/games", srv.HandleCreateGame)
+	srv.Mux.HandleFunc("POST /api/games/{id}/join", srv.HandleJoinGame)
+	srv.Mux.HandleFunc("GET /api/leaderboard", srv.HandleLeaderboard)
+	srv.Mux.HandleFunc("/ws", srv.HandleWebSocket)
+	srv.Mux.HandleFunc("/ws/global-chat", srv.HandleLobbyChatWS)
+	srv.Mux.Handle("/", http.FileServer(http.Dir(webDir)))
+}
+
 func (server *Server) FindGameById(gameId uuid.UUID) (*game.Game, bool) {
 	g, exists := server.activeGames[gameId]
 	return g, exists
