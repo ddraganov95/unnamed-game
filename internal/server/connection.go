@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 	"uuid"
 
 	"unnamed-game/internal/game"
@@ -242,6 +243,11 @@ func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn
 	}
 	server.mu.Unlock()
 
+	// Normal-closure frame so the client sees a clean close, not a dropped TCP
+	// connection. Sent after the session summary (see handlePlayerDisconnectEvent).
+	_ = targetConn.Conn.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+		time.Now().Add(time.Second))
 	targetConn.Conn.Close()
 
 	g.SendEvent(game.GameEvent{ // no-op if the game already ended
@@ -266,7 +272,15 @@ func (s *Server) processAndSaveEvents(g *game.Game, event game.ServerEvent) {
 	})
 }
 func (s *Server) runAsync(taskName string, gameID uuid.UUID, dbOp func(ctx context.Context) error) {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
+	if s.writesClosed {
+		slog.Error("shutdown in progress, async db task dropped", "task", taskName, "game_id", gameID)
+		return
+	}
+	s.asyncWG.Add(1)
 	go func() {
+		defer s.asyncWG.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
 		defer cancel()
 

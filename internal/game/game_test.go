@@ -396,8 +396,8 @@ func TestQuitWithOtherPlayersKeepsGame(t *testing.T) {
 func TestDestroyIsIdempotent(t *testing.T) {
 	g := newTestGame(t)
 	fakeServer(t, g)
-	withTimeout(t, 3*time.Second, "first Destroy", func() { g.Destroy("test") })
-	withTimeout(t, 3*time.Second, "second Destroy", func() { g.Destroy("test") })
+	withTimeout(t, 3*time.Second, "first Destroy", func() { g.Destroy(DestroyReasonIdleCheck) })
+	withTimeout(t, 3*time.Second, "second Destroy", func() { g.Destroy(DestroyReasonIdleCheck) })
 }
 
 func TestTickRendersFrameForActivePlayers(t *testing.T) {

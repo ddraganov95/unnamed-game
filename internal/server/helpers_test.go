@@ -81,7 +81,7 @@ func (e *testEnv) destroyAllGames() {
 	e.srv.mu.RUnlock()
 	for _, g := range games {
 		done := make(chan struct{})
-		go func() { g.Destroy("test_cleanup"); close(done) }()
+		go func() { g.Destroy(game.DestroyReasonIdleCheck); close(done) }()
 		select {
 		case <-done:
 		case <-time.After(7 * time.Second):

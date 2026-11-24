@@ -72,6 +72,7 @@ func (game *Game) goSafe(fn func()) {
 		fn()
 	}()
 }
+
 // NewGame creates a game and starts its goroutines.
 func NewGame(gameId uuid.UUID, achievementCatalog *AchievementCatalog) *Game {
 	game := CreateGame(gameId, achievementCatalog)
@@ -188,7 +189,7 @@ func (game *Game) HandleEmptyGame() {
 			return
 		case <-ticker.C:
 			if game.IdleTick() {
-				game.Destroy(DestroyReasonIdleCheck.String())
+				game.Destroy(DestroyReasonIdleCheck)
 				return
 			}
 		}
@@ -236,6 +237,8 @@ type DestroyReason int
 const (
 	DestroyReasonIdleCheck DestroyReason = iota
 	DestroyReasonPlayerQuit
+	DestroyReasonServerShutdown
+	DestroyReasonPanic
 )
 
 func (dr DestroyReason) String() string {
@@ -244,6 +247,10 @@ func (dr DestroyReason) String() string {
 		return "idle_check"
 	case DestroyReasonPlayerQuit:
 		return "player_quit"
+	case DestroyReasonServerShutdown:
+		return "server_shutdown"
+	case DestroyReasonPanic:
+		return "panic"
 	default:
 		return "unknown"
 	}
@@ -251,7 +258,7 @@ func (dr DestroyReason) String() string {
 
 // Destroy ends the game. Callers outside the game loop use this; the loop
 // itself (which already holds game.Mu) uses destroyLocked.
-func (game *Game) Destroy(reason string) {
+func (game *Game) Destroy(reason DestroyReason) {
 	game.Mu.Lock()
 	defer game.Mu.Unlock()
 	game.destroyLocked(reason)
@@ -260,12 +267,13 @@ func (game *Game) Destroy(reason string) {
 // destroyLocked ends the game. Caller must hold game.Mu. Players still
 // connected are disconnected first so their sessions are saved like any
 // other disconnect (the server handles those events before GameDestroy).
-func (game *Game) destroyLocked(reason string) {
+func (game *Game) destroyLocked(reason DestroyReason) {
 	select {
 	case <-game.DestroyChan:
 		return // Already destroyed, exit safely
 	default:
 	}
+	reasonText := reason.String()
 	for _, p := range game.GetActivePlayers() {
 		game.HandlePlayerDisconnect(p.GetID(), DisconnectReasonGameDestroyed)
 	}
@@ -273,17 +281,17 @@ func (game *Game) destroyLocked(reason string) {
 	dcChan := make(chan error)
 	game.ServerEventChan <- ServerEvent{
 		Type:     EventTypeGameDestroy,
-		Value:    reason,
+		Value:    reasonText,
 		RespChan: dcChan,
 	}
 	select {
 	case <-dcChan:
 	case <-time.After(5 * time.Second):
-		slog.Error("timeout waiting for mass disconnect response", "game_id", game.GameId, "reason", reason)
+		slog.Error("timeout waiting for mass disconnect response", "game_id", game.GameId, "reason", reasonText)
 	}
 
 	game.ServerEventChan <- ServerEvent{Type: EventTypeDeactivateGame}
-	slog.Info("game destroyed", "game_id", game.GameId, "reason", reason,
+	slog.Info("game destroyed", "game_id", game.GameId, "reason", reasonText,
 		"duration_s", int(time.Since(game.StartedAt).Seconds()), "players", len(game.Players))
 }
 
@@ -415,7 +423,7 @@ func (game *Game) HandlePlayerDisconnect(playerID string, reason DisconnectReaso
 func (game *Game) HandlePlayerQuit(playerID string) {
 	game.HandlePlayerDisconnect(playerID, DisconnectReasonPlayerQuit)
 	if len(game.GetActivePlayers()) == 0 {
-		game.destroyLocked(DestroyReasonPlayerQuit.String())
+		game.destroyLocked(DestroyReasonPlayerQuit)
 	}
 }
 

@@ -38,7 +38,7 @@ func TestDestroyStopsAllGameGoroutines(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 	g := startRealGame(t)
 	connect(t, g, "alice")
-	withTimeout(t, 5*time.Second, "Destroy", func() { g.Destroy("test") })
+	withTimeout(t, 5*time.Second, "Destroy", func() { g.Destroy(DestroyReasonIdleCheck) })
 	// Give the loops a moment to observe DestroyChan.
 	time.Sleep(100 * time.Millisecond)
 }
@@ -57,7 +57,7 @@ func TestTickRenderDoesNotRaceWithDestroy(t *testing.T) {
 				g.Tick()
 			}
 		}()
-		withTimeout(t, 5*time.Second, "Destroy", func() { g.Destroy("test") })
+		withTimeout(t, 5*time.Second, "Destroy", func() { g.Destroy(DestroyReasonIdleCheck) })
 		withTimeout(t, 5*time.Second, "Tick loop", func() { <-done })
 	}
 }
@@ -133,7 +133,7 @@ func TestGameLoopUnderConcurrentEvents(t *testing.T) {
 	// MaxPlayerCount); events are processed in order.
 	g.EventChan <- GameEvent{Type: EventTypeDisconnect, PlayerID: "p1"}
 	connect(t, g, "late")
-	withTimeout(t, 5*time.Second, "Destroy", func() { g.Destroy("test") })
+	withTimeout(t, 5*time.Second, "Destroy", func() { g.Destroy(DestroyReasonIdleCheck) })
 }
 
 // IdleTick (1-minute ticker) mutates players under the lock while the game
@@ -158,7 +158,7 @@ func TestIdleTickConcurrentWithGameLoop(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	close(stop)
-	withTimeout(t, 5*time.Second, "Destroy", func() { g.Destroy("test") })
+	withTimeout(t, 5*time.Second, "Destroy", func() { g.Destroy(DestroyReasonIdleCheck) })
 }
 
 // QuitGame and GetNextLevel send on g.EventChan from inside UpdatePlayer,
@@ -203,7 +203,7 @@ func TestSendEventAfterDestroyDoesNotBlock(t *testing.T) {
 	for len(g.EventChan) < cap(g.EventChan) {
 		g.EventChan <- GameEvent{Type: EventTypeKey, PlayerID: "x", Key: 'w'}
 	}
-	withTimeout(t, 3*time.Second, "Destroy", func() { g.Destroy("test") })
+	withTimeout(t, 3*time.Second, "Destroy", func() { g.Destroy(DestroyReasonIdleCheck) })
 	var sent bool
 	withTimeout(t, 2*time.Second, "SendEvent on destroyed game", func() {
 		sent = g.SendEvent(GameEvent{Type: EventTypeDisconnect, PlayerID: "x"})
