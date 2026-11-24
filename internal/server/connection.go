@@ -136,10 +136,12 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			connection, exists := server.activeConns[event.PlayerID]
 			server.mu.RUnlock()
 			if exists {
-				connection.WriteJSON(OutboundWSMessage{
+				if err := connection.WriteJSON(OutboundWSMessage{
 					Type:    "copy_clipboard",
 					Payload: event.Value,
-				})
+				}); err != nil {
+					slog.Debug("copy clipboard message not sent", "game_id", g.GameId, "player_id", event.PlayerID, "error", err)
+				}
 			}
 		case game.EventTypeAchievementUnlocked:
 			server.mu.RLock()
@@ -222,12 +224,14 @@ func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string,
 		return // socket already gone (closed tab) or replaced by a reconnect
 	}
 	if saved {
-		connection.WriteJSON(map[string]any{
+		if err := connection.WriteJSON(map[string]any{
 			"type":         "session_summary",
 			"player_id":    playerID,
 			"user_stats":   userStats,
 			"achievements": payload.Achievements,
-		})
+		}); err != nil {
+			slog.Debug("session summary not sent", "game_id", g.GameId, "player_id", playerID, "error", err)
+		}
 	}
 	server.DisconnectPlayer(g, playerID, connection)
 }

@@ -190,7 +190,7 @@ func (s *Server) Run(ctx context.Context) error {
 	port := fmt.Sprintf(":%s", s.serverConfig.Port)
 	s.httpServer = &http.Server{
 		Addr:    port,
-		Handler: s.Mux,
+		Handler: s.Handler(),
 	}
 
 	shutdownDone := make(chan struct{})

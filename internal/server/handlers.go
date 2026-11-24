@@ -59,11 +59,11 @@ func (server *Server) HandleCreateGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := server.db.InsertNewGame(r.Context(), targetGameID, server.buildServerHost()); err != nil {
-		slog.Error("failed to create game in db", "game_id", targetGameID, "player_id", playerID, "error", err)
+		requestLogger(r.Context()).Error("failed to create game in db", "game_id", targetGameID, "player_id", playerID, "error", err)
 		http.Error(w, "Failed to create game", http.StatusInternalServerError)
 		return
 	}
-	slog.Info("game created", "game_id", targetGameID, "player_id", playerID)
+	requestLogger(r.Context()).Info("game created", "game_id", targetGameID, "player_id", playerID)
 	// Add joining player's achievement progress in this room
 	progress, err := server.db.FetchPlayerProgress(r.Context(), userID)
 	if err == nil {
@@ -114,6 +114,7 @@ func (server *Server) HandleJoinGame(w http.ResponseWriter, r *http.Request) {
 	}
 	host, err := server.db.FetchGameHostByGameId(r.Context(), parsedID)
 	if err != nil {
+		requestLogger(r.Context()).Error("failed to look up game host", "game_id", parsedID, "error", err)
 		http.Error(w, "Game not found", http.StatusNotFound)
 		return
 	}
@@ -175,7 +176,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	server.mu.Unlock()
 	g, ok := server.FindGameByPlayerId(playerID)
 	if !ok {
-		slog.Warn("no game found for player on websocket connect", "player_id", playerID)
+		requestLogger(r.Context()).Warn("no game found for player on websocket connect", "player_id", playerID)
 		return
 	}
 
@@ -186,6 +187,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := server.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		requestLogger(r.Context()).Info("websocket upgrade failed", "player_id", playerID, "error", err)
 		return
 	}
 	ctx, cancel := context.WithCancel(r.Context())
@@ -204,10 +206,15 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		if len(reason) > 120 { // control frame payload limit is 125 bytes
 			reason = reason[:120]
 		}
-		conn.WriteControl(websocket.CloseMessage,
+		if err := conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(CloseCodeJoinRejected, reason),
-			time.Now().Add(time.Second))
-		conn.Close()
+			time.Now().Add(time.Second)); err != nil {
+			requestLogger(r.Context()).Debug("join rejection close frame not sent", "player_id", playerID, "error", err)
+		}
+		if err := conn.Close(); err != nil {
+			requestLogger(r.Context()).Debug("rejected websocket close failed", "player_id", playerID, "error", err)
+		}
+		requestLogger(r.Context()).Info("websocket join rejected", "game_id", g.GameId, "player_id", playerID, "close_code", CloseCodeJoinRejected, "reason", reason)
 		return
 	}
 	defer server.DisconnectPlayer(g, playerID, newConnection)
@@ -225,7 +232,7 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 
 	conn, err := server.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		slog.Error("lobby chat websocket upgrade failed", "player_id", playerID, "error", err)
+		requestLogger(r.Context()).Info("lobby chat websocket upgrade failed", "player_id", playerID, "error", err)
 		return
 	}
 	ctx, cancel := context.WithCancel(r.Context())
@@ -243,12 +250,14 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 		for msg := range chatConn.Write {
 			conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 			if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
+				requestLogger(r.Context()).Debug("lobby chat write failed", "player_id", playerID, "error", err)
 				break
 			}
 		}
 	}()
 	for _, historyMsg := range server.chatHistory {
 		if err := conn.WriteMessage(websocket.TextMessage, []byte(historyMsg)); err != nil {
+			requestLogger(r.Context()).Debug("lobby chat history write failed", "player_id", playerID, "error", err)
 			break
 		}
 	}
@@ -265,6 +274,7 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
+			requestLogger(r.Context()).Debug("lobby chat connection closed", "player_id", playerID, "error", err)
 			break
 		}
 
@@ -290,7 +300,7 @@ func (server *Server) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := server.db.UpsertUser(r.Context(), req.PlayerID)
 	if err != nil {
-		slog.Error("failed to upsert user", "player_id", req.PlayerID, "error", err)
+		requestLogger(r.Context()).Error("failed to upsert user", "player_id", req.PlayerID, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -299,7 +309,7 @@ func (server *Server) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 	server.mu.Lock()
 	server.playerUsers[req.PlayerID] = user.UserID
 	server.mu.Unlock()
-	slog.Debug("user upserted", "player_id", req.PlayerID, "user_id", user.UserID)
+	requestLogger(r.Context()).Debug("user upserted", "player_id", req.PlayerID, "user_id", user.UserID)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "player_session",
 		Value:    cookieValue, // "user-uuid:player-id"
@@ -326,16 +336,17 @@ func (server *Server) HandleGetSelf(w http.ResponseWriter, r *http.Request) {
 
 	userSummary, err := server.db.FetchUserSummary(r.Context(), userID)
 	if err != nil {
-		slog.Error("failed to fetch user summary", "user_id", userID, "error", err)
+		requestLogger(r.Context()).Error("failed to fetch user summary", "user_id", userID, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if err := json.NewEncoder(w).Encode(userSummary); err != nil {
+		requestLogger(r.Context()).Error("failed to encode user summary", "user_id", userID, "error", err)
 		http.Error(w, "Failed to encode user data", http.StatusInternalServerError)
 		return
 	}
-	slog.Debug("fetched user summary", "player_id", playerID, "user_id", userSummary.UserID)
+	requestLogger(r.Context()).Debug("fetched user summary", "player_id", playerID, "user_id", userSummary.UserID)
 }
 
 func (server *Server) HandleGetSelfAchievements(w http.ResponseWriter, r *http.Request) {
@@ -355,17 +366,18 @@ func (server *Server) HandleGetSelfAchievements(w http.ResponseWriter, r *http.R
 
 	achievements, err := server.db.FetchPlayerProgress(r.Context(), userID)
 	if err != nil {
-		slog.Error("failed to fetch achievements", "user_id", userID, "error", err)
+		requestLogger(r.Context()).Error("failed to fetch achievements", "user_id", userID, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if err := json.NewEncoder(w).Encode(achievements); err != nil {
+		requestLogger(r.Context()).Error("failed to encode achievements", "user_id", userID, "error", err)
 		http.Error(w, "Failed to encode achievements data", http.StatusInternalServerError)
 		return
 	}
 
-	slog.Debug("fetched achievements", "user_id", userID)
+	requestLogger(r.Context()).Debug("fetched achievements", "user_id", userID)
 }
 
 const LeaderBoardPageSize = 10 //NUMBER OF ROWS SHOWN ON THE LEADERBOARD
@@ -392,14 +404,14 @@ func (server *Server) HandleGetSelfLeaderboard(w http.ResponseWriter, r *http.Re
 	// Fetch 10 + 1 rows aligned to user's page
 	usersOnLeaderboard, err := server.db.FetchUserLeaderboard(r.Context(), userID, LeaderBoardPageSize)
 	if err != nil {
-		slog.Error("failed to fetch leaderboard", "user_id", userID, "error", err)
+		requestLogger(r.Context()).Error("failed to fetch leaderboard", "user_id", userID, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	currentuser, err := getCurrentUserFromPage(userID, usersOnLeaderboard)
 	if err != nil {
-		slog.Warn("user not found on leaderboard page", "user_id", userID, "error", err)
+		requestLogger(r.Context()).Warn("user not found on leaderboard page", "user_id", userID, "error", err)
 	}
 
 	//page calculation math
@@ -425,10 +437,11 @@ func (server *Server) HandleGetSelfLeaderboard(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
+		requestLogger(r.Context()).Error("failed to encode leaderboard", "user_id", userID, "error", err)
 		http.Error(w, "Failed to encode leaderboard data", http.StatusInternalServerError)
 		return
 	}
-	slog.Debug("fetched leaderboard", "user_id", userID)
+	requestLogger(r.Context()).Debug("fetched leaderboard", "user_id", userID)
 }
 func getCurrentUserFromPage(userID uuid.UUID, usersOnLeaderboard []db.UserLeaderboardView) (db.UserLeaderboardView, error) {
 	for i := range usersOnLeaderboard {
@@ -463,7 +476,7 @@ func (server *Server) HandleLeaderboard(w http.ResponseWriter, r *http.Request) 
 	}
 	usersOnLeaderboard, err := server.db.FetchLeaderboardPage(r.Context(), page, LeaderBoardPageSize)
 	if err != nil {
-		slog.Error("failed to fetch leaderboard page", "error", err)
+		requestLogger(r.Context()).Error("failed to fetch leaderboard page", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -482,6 +495,7 @@ func (server *Server) HandleLeaderboard(w http.ResponseWriter, r *http.Request) 
 	//Send JSON
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
+		requestLogger(r.Context()).Error("failed to encode leaderboard page", "error", err)
 		http.Error(w, "Failed to encode leaderboard data", http.StatusInternalServerError)
 		return
 	}
@@ -500,6 +514,20 @@ func getPrevNext[T any](paginatedList []T, page int, maxSize int) (bool, bool) {
 	return hasNext, hasPrev
 }
 func ExtractSessionIDs(r *http.Request) (userID, playerID string, err error) {
+	userID, playerID, err = parseSessionCookie(r)
+	if err != nil {
+		reason := "malformed"
+		if errors.Is(err, http.ErrNoCookie) {
+			reason = "missing"
+		}
+		requestLogger(r.Context()).Debug("session cookie rejected", "reason", reason)
+	}
+	return userID, playerID, err
+}
+
+// parseSessionCookie reads the session cookie without logging, so the request
+// logger can use it too.
+func parseSessionCookie(r *http.Request) (userID, playerID string, err error) {
 	cookie, err := r.Cookie("player_session")
 	if err != nil {
 		return "", "", err
@@ -526,11 +554,11 @@ func (server *Server) HandleGetSelfConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	slog.Debug("fetching user configuration", "user_id", userID, "player_id", playerID)
+	requestLogger(r.Context()).Debug("fetching user configuration", "user_id", userID, "player_id", playerID)
 
 	userConfig, err := server.db.FetchUserConfiguration(r.Context(), userID)
 	if err != nil {
-		slog.Error("failed to fetch user configuration", "user_id", userID, "error", err)
+		requestLogger(r.Context()).Error("failed to fetch user configuration", "user_id", userID, "error", err)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -598,11 +626,11 @@ func (server *Server) HandleUpdateSelfConfig(w http.ResponseWriter, r *http.Requ
 		seenKeys[key] = action
 	}
 
-	slog.Debug("updating user configuration", "user_id", userID, "player_id", playerID)
+	requestLogger(r.Context()).Debug("updating user configuration", "user_id", userID, "player_id", playerID)
 
 	err = server.db.UpsertUserConfiguration(r.Context(), userID, userConfig)
 	if err != nil {
-		slog.Error("failed to save user configuration", "user_id", userID, "error", err)
+		requestLogger(r.Context()).Error("failed to save user configuration", "user_id", userID, "error", err)
 		http.Error(w, "failed to save configuration", http.StatusInternalServerError)
 		return
 	}
