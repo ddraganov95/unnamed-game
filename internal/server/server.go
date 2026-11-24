@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -199,18 +199,18 @@ func (s *Server) Run(ctx context.Context) error {
 	go func() {
 		defer close(shutdownDone)
 		<-ctx.Done()
-		log.Println("[SERVER] Shutdown signal received, closing HTTP server...")
+		slog.Info("shutdown signal received, closing HTTP server")
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
-			log.Printf("[SERVER] HTTP shutdown forced: %v", err)
+			slog.Error("http shutdown forced", "error", err)
 		}
 		s.endActiveGamesOnShutdown()
 	}()
 
-	log.Printf("[SERVER] Running at http://localhost%s\n", port)
+	slog.Info("server listening", "addr", port)
 
 	err := s.httpServer.ListenAndServe()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -220,7 +220,7 @@ func (s *Server) Run(ctx context.Context) error {
 	// ListenAndServe returns as soon as shutdown starts; wait for the games'
 	// DB writes to finish before the process exits.
 	<-shutdownDone
-	log.Println("[SERVER] Server stopped")
+	slog.Info("server stopped")
 	return nil
 }
 func (server *Server) buildServerHost() string {
@@ -245,7 +245,7 @@ func (server *Server) dbWriteWorker(ctx context.Context) {
 			cancel()
 
 			if err != nil {
-				log.Printf("[DB WRITE] %s failed: %v", task.name, err)
+				slog.Error("db write failed", "task", task.name, "error", err)
 			}
 		}
 	}
@@ -255,7 +255,7 @@ func (server *Server) enqueueDBWrite(name string, run func(context.Context) erro
 	select {
 	case server.dbWriteChan <- dbWriteTask{name: name, run: run}:
 	default:
-		log.Printf("[DB WRITE] queue full, dropping %s", name)
+		slog.Error("db write queue full, write dropped", "task", name)
 	}
 }
 
@@ -283,7 +283,7 @@ func (s *Server) endActiveGamesOnShutdown() {
 			return
 		}
 		if time.Now().After(deadline) {
-			log.Printf("[SERVER] %d game(s) still active after shutdown timeout", remaining)
+			slog.Warn("games still active after shutdown timeout", "count", remaining)
 			return
 		}
 		time.Sleep(50 * time.Millisecond)

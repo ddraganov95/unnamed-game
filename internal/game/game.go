@@ -2,7 +2,8 @@ package game
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ type Game struct {
 	Level             *Level
 	EmptyMinutes      int
 	State             GameState
+	StartedAt         time.Time
 }
 type GameState int
 
@@ -40,9 +42,10 @@ const (
 // ---------------------------------------------------------------------------
 
 func InitializeGame() *Game {
-	fmt.Print("Preparing Game...\r\n")
+	slog.Debug("preparing game")
 	game := &Game{
 		State:       StateGamePlaying,
+		StartedAt:   time.Now(),
 		DestroyChan: make(chan struct{}),
 		GameChat:    make(chan string, MaxChatHistory),
 		// Each game has its own global chat inbox; the server fans every
@@ -58,7 +61,7 @@ func (game *Game) goSafe(fn func()) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("[ERROR] Panic recovered in background worker: %v", r)
+				slog.Error("panic recovered in background worker", "game_id", game.GameId, "panic", r, "stack", string(debug.Stack()))
 				select {
 				case <-game.DestroyChan:
 				default:
@@ -116,11 +119,11 @@ func (game *Game) InitFrame() {
 func (game *Game) StartGame() {
 	ticker := time.NewTicker(30 * time.Millisecond)
 	defer ticker.Stop()
-	log.Println("[DEBUG] Start Game")
+	slog.Debug("game loop started", "game_id", game.GameId)
 	for {
 		select {
 		case <-game.DestroyChan:
-			log.Println("[DEBUG] StartGame loop terminated.")
+			slog.Debug("game loop terminated", "game_id", game.GameId)
 			return
 		case <-ticker.C:
 			game.Tick()
@@ -181,7 +184,7 @@ func (game *Game) HandleEmptyGame() {
 	for {
 		select {
 		case <-game.DestroyChan:
-			log.Println("[DEBUG] HandleEmptyGame loop terminated.")
+			slog.Debug("idle-check loop terminated", "game_id", game.GameId)
 			return
 		case <-ticker.C:
 			if game.IdleTick() {
@@ -197,22 +200,21 @@ func (game *Game) HandleEmptyGame() {
 func (game *Game) IdleTick() bool {
 	game.Mu.Lock()
 	defer game.Mu.Unlock()
-	log.Printf("[DEBUG] AFK TIMER TICK!")
 	for _, p := range game.Players {
 		p.AFKMinutes++
-		log.Printf("[DEBUG] Player %s afk for %d minute(s)", p.GetID(), p.AFKMinutes)
+		slog.Debug("player afk", "game_id", game.GameId, "player_id", p.GetID(), "minutes", p.AFKMinutes)
 		if p.AFKMinutes >= PlayerAllowedAFKMins {
 			game.AchievementEngine.PublishEvent(AchievementEvent{
 				PlayerIDs: game.GetActiveAndAlivePlayerID(),
 				Key:       "GAME:default",
 				Amount:    0,
 			})
-			game.HandlePlayerDisconnect(p.GetID())
+			game.HandlePlayerDisconnect(p.GetID(), DisconnectReasonAFKTimeout)
 		}
 	}
 	if len(game.GetActivePlayers()) == 0 || game.State != StateGamePlaying {
 		game.EmptyMinutes++
-		log.Printf("[DEBUG] Game empty for %d minute(s)", game.EmptyMinutes)
+		slog.Debug("game empty", "game_id", game.GameId, "minutes", game.EmptyMinutes)
 		game.CreateLog("[SERVER] Game ending in %d minute(s)", StopGameAfterIdleMinutes-game.EmptyMinutes)
 		game.AchievementEngine.PublishEvent(AchievementEvent{
 			PlayerIDs: game.GetActiveAndAlivePlayerID(),
@@ -220,7 +222,7 @@ func (game *Game) IdleTick() bool {
 			Amount:    0,
 		})
 		if game.EmptyMinutes >= StopGameAfterIdleMinutes {
-			log.Println("[DEBUG] Idle threshold reached via ticker. Shutting down game.")
+			slog.Info("idle threshold reached, shutting down game", "game_id", game.GameId)
 			return true
 		}
 	} else {
@@ -265,7 +267,7 @@ func (game *Game) destroyLocked(reason string) {
 	default:
 	}
 	for _, p := range game.GetActivePlayers() {
-		game.HandlePlayerDisconnect(p.GetID())
+		game.HandlePlayerDisconnect(p.GetID(), DisconnectReasonGameDestroyed)
 	}
 	close(game.DestroyChan)
 	dcChan := make(chan error)
@@ -277,11 +279,12 @@ func (game *Game) destroyLocked(reason string) {
 	select {
 	case <-dcChan:
 	case <-time.After(5 * time.Second):
-		log.Println("[ERROR] Timeout waiting for mass disconnect response")
+		slog.Error("timeout waiting for mass disconnect response", "game_id", game.GameId, "reason", reason)
 	}
 
 	game.ServerEventChan <- ServerEvent{Type: EventTypeDeactivateGame}
-	log.Println("[DEBUG] Game instance successfully destroyed and idle check sent.")
+	slog.Info("game destroyed", "game_id", game.GameId, "reason", reason,
+		"duration_s", int(time.Since(game.StartedAt).Seconds()), "players", len(game.Players))
 }
 
 // ---------------------------------------------------------------------------
@@ -298,22 +301,20 @@ func (game *Game) SpawnPlayer(player *Player) {
 	}
 	if !alreadyExists {
 		game.Players = append(game.Players, player)
-		log.Printf("Successfully spawned player %s", player.GetID())
 	}
 	pos, available := game.Level.GetSpawnPoint()
 	if !available {
-		log.Println("No available spawn points found!")
+		slog.Warn("no available spawn point", "game_id", game.GameId, "player_id", player.GetID())
 		return
 	}
 	if !game.Level.PutEntityAtPosition(player, pos) {
-		log.Println("Failed to place player: Spawn point was blocked.")
+		slog.Warn("spawn point blocked", "game_id", game.GameId, "player_id", player.GetID())
 		return
 	}
-	log.Printf("Successfully spawned player at %d, %d", pos.X, pos.Y)
+	slog.Debug("player spawned", "game_id", game.GameId, "player_id", player.GetID(), "x", pos.X, "y", pos.Y)
 }
 
 func (game *Game) HandlePlayerConnect(event GameEvent) error {
-	log.Println("[DEBUG] Player Connecting")
 	// Authoritative capacity check: this runs inside the game loop, so unlike
 	// the join pre-check it cannot race with other players connecting. A
 	// player who is still counted as active (reconnect) keeps their slot.
@@ -321,7 +322,7 @@ func (game *Game) HandlePlayerConnect(event GameEvent) error {
 		// Reconnect while the old socket is still registered (page refresh):
 		// the new connection takes over the player as-is. Re-placing them
 		// here would leave a stale tile entry behind.
-		log.Printf("[DEBUG] %s reconnected (conn %d -> %d)", event.PlayerID, player.ConnID, event.ConnID)
+		slog.Info("player reconnected", "game_id", game.GameId, "player_id", event.PlayerID, "old_conn", player.ConnID, "new_conn", event.ConnID)
 		player.ConnID = event.ConnID
 		game.EmptyMinutes = 0
 		return nil
@@ -332,10 +333,9 @@ func (game *Game) HandlePlayerConnect(event GameEvent) error {
 	if player, exists := game.GetPlayerByID(event.PlayerID); exists {
 		player.ConnID = event.ConnID
 		player.startPlayTime()
-		log.Println("[DEBUG] Existing Player Connecting")
 		if game.LevelsCompleted == player.LevelsCompleted {
 			if !game.Level.PutEntityAtPosition(player, player.GetPosition()) {
-				log.Printf("[DEBUG] Old position blocked for %s, falling back to spawn", event.PlayerID)
+				slog.Debug("old position blocked, falling back to spawn", "game_id", game.GameId, "player_id", event.PlayerID)
 				game.SpawnPlayer(player)
 			}
 		} else {
@@ -343,18 +343,17 @@ func (game *Game) HandlePlayerConnect(event GameEvent) error {
 		}
 		player.PlayerState = StatePlaying
 	} else {
-		log.Println("[DEBUG] New Player Connecting")
 		keybinds, ok := event.Object.(map[string]string)
 		if !ok {
-			log.Printf("[ERROR] Expected map[string]string in event.Object, got %T", event.Object)
+			slog.Error("unexpected keybinds type on connect", "game_id", game.GameId, "player_id", event.PlayerID, "type", fmt.Sprintf("%T", event.Object))
 		}
 		player := NewPlayer(event.PlayerID, keybinds)
 		player.ConnID = event.ConnID
 		player.startPlayTime()
 		player.GameID = game.GameId.String()
-		log.Printf("[DEBUG] New Player Game id: %s", player.GameID)
 		game.SpawnPlayer(player)
 	}
+	slog.Info("player connected", "game_id", game.GameId, "player_id", event.PlayerID, "conn_id", event.ConnID)
 	game.EmptyMinutes = 0
 	return nil
 }
@@ -368,9 +367,33 @@ type PlayerDisconnectPayload struct {
 	Achievements        []AchievementView    // for the client's session summary
 }
 
+// DisconnectReason says why a player was disconnected, for logs.
+type DisconnectReason int
+
+const (
+	DisconnectReasonSocketClosed DisconnectReason = iota
+	DisconnectReasonPlayerQuit
+	DisconnectReasonAFKTimeout
+	DisconnectReasonGameDestroyed
+)
+
+func (dr DisconnectReason) String() string {
+	switch dr {
+	case DisconnectReasonSocketClosed:
+		return "socket_closed"
+	case DisconnectReasonPlayerQuit:
+		return "player_quit"
+	case DisconnectReasonAFKTimeout:
+		return "afk_timeout"
+	case DisconnectReasonGameDestroyed:
+		return "game_destroyed"
+	default:
+		return "unknown"
+	}
+}
+
 // HandlePlayerDisconnect must be called with game.Mu held (game loop).
-func (game *Game) HandlePlayerDisconnect(playerID string) {
-	log.Println("[DEBUG] Player Disconnecting")
+func (game *Game) HandlePlayerDisconnect(playerID string, reason DisconnectReason) {
 	if player, exists := game.GetActivePlayerById(playerID); exists {
 		player.PlayerState = StateDisconnected
 		player.stopPlayTime()
@@ -383,17 +406,15 @@ func (game *Game) HandlePlayerDisconnect(playerID string) {
 		game.AchievementEngine.RemovePlayerSession(playerID)
 		game.Level.RemoveEntity(player)
 		game.ServerEventChan <- ServerEvent{PlayerID: playerID, Type: EventTypeDisconnect, ConnID: player.ConnID, Object: payload}
-		log.Printf("[DEBUG] Player %s Disconnected", playerID)
+		slog.Info("player disconnected", "game_id", game.GameId, "player_id", playerID, "conn_id", player.ConnID, "reason", reason.String())
 	}
 }
 
 // HandlePlayerQuit disconnects the player and destroys the game when nobody
 // is left. Caller must hold game.Mu (it runs inside the game loop).
 func (game *Game) HandlePlayerQuit(playerID string) {
-	log.Printf("[DEBUG] Player %s quit", playerID)
-	game.HandlePlayerDisconnect(playerID)
+	game.HandlePlayerDisconnect(playerID, DisconnectReasonPlayerQuit)
 	if len(game.GetActivePlayers()) == 0 {
-		log.Printf("[DEBUG] Game destroy")
 		game.destroyLocked(DestroyReasonPlayerQuit.String())
 	}
 }
@@ -741,7 +762,8 @@ func (game *Game) appendChat(msg string) {
 }
 func (game *Game) BroadcastGameChat(playerid string, message string) {
 	msg := fmt.Sprintf("[%s]: %s", playerid, message)
-	log.Println(msg)
+	slog.Info("game chat", "game_id", game.GameId, "player_id", playerid, "length", len(message))
+	slog.Debug("game chat text", "game_id", game.GameId, "player_id", playerid, "text", message)
 	select {
 	case game.GameChat <- msg:
 	default:

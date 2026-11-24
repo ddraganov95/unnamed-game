@@ -1,6 +1,6 @@
 package game
 
-import "log"
+import "log/slog"
 
 type EventType int
 
@@ -51,16 +51,14 @@ EventLoop:
 			}
 			switch event.Type {
 			case EventTypeConnect:
-				log.Printf("[DEBUG] Conn %s ", event.PlayerID)
 				err := game.HandlePlayerConnect(event)
 				event.RespChan <- err
 			case EventTypeDisconnect:
-				log.Printf("[DEBUG] Disco %s ", event.PlayerID)
 				if p, ok := game.GetPlayerByID(event.PlayerID); ok && event.ConnID != 0 && p.ConnID != event.ConnID {
-					log.Printf("[DEBUG] Ignoring disconnect of replaced connection %d for %s (current %d)", event.ConnID, event.PlayerID, p.ConnID)
+					slog.Debug("ignoring disconnect of replaced connection", "player_id", event.PlayerID, "conn_id", event.ConnID, "current_conn_id", p.ConnID)
 					break
 				}
-				game.HandlePlayerDisconnect(event.PlayerID)
+				game.HandlePlayerDisconnect(event.PlayerID, DisconnectReasonSocketClosed)
 			case EventTypePlayerQuit:
 				game.HandlePlayerQuit(event.PlayerID)
 			case EventTypeKey:

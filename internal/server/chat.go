@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"unnamed-game/internal/game"
 )
@@ -33,7 +33,7 @@ func (server *Server) BroadcastGlobalMessage(msg string) {
 	server.mu.RUnlock()
 	for _, g := range games {
 		if !g.DeliverGlobalChat(msg) {
-			log.Printf("[CHAT] Game %s chat inbox full; global message dropped for it", g.GameId)
+			slog.Warn("global chat inbox full, message dropped", "game_id", g.GameId)
 		}
 	}
 }
@@ -42,11 +42,12 @@ func (server *Server) SendGlobalChatToDB(playerId string, message string) {
 	userId, exists := server.playerUsers[playerId]
 	server.mu.RUnlock()
 	if !exists {
-		log.Printf("[DEBUG] PlayerID: %s could not be matched to UserID. Message: %s not sent", playerId, message)
+		slog.Warn("global chat dropped, player not matched to user", "player_id", playerId)
 		return
 	}
 	msgBroadcasted := fmt.Sprintf("[%s]: %s", playerId, message)
-	log.Println(msgBroadcasted)
+	slog.Info("global chat", "player_id", playerId, "length", len(message))
+	slog.Debug("global chat text", "player_id", playerId, "text", message)
 
 	server.enqueueDBWrite("send global chat", func(ctx context.Context) error {
 		return server.db.CallFunction(ctx, "global_chat_message_send", userId, message, msgBroadcasted)
@@ -60,15 +61,14 @@ type AchievementNotificationPayload struct {
 }
 
 func (server *Server) handleAchievementUnlockedEvent(payload string) {
-	log.Printf("[DB EVENT] Handling achievement unlocked event: %s", payload)
 	var payloadJson AchievementNotificationPayload
 	err := json.Unmarshal([]byte(payload), &payloadJson)
 	if err != nil {
-		log.Printf("[DB EVENT] Failed to unmarshal achievement unlocked payload: %v", err)
+		slog.Error("failed to unmarshal achievement unlocked payload", "error", err)
 		return
 	}
 	if !payloadJson.IsGlobalAnnouncement {
-		log.Printf("[DB EVENT] Achievement unlocked for player, not globally announced %s: %s", payloadJson.PlayerID, payloadJson.Title)
+		slog.Debug("achievement unlocked, not announced globally", "player_id", payloadJson.PlayerID, "title", payloadJson.Title)
 		return
 	}
 	message := fmt.Sprintf("[Achievement]: %s unlocked %s!", payloadJson.PlayerID, payloadJson.Title)

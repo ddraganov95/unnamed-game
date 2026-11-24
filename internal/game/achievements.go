@@ -2,7 +2,7 @@ package game
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -121,12 +121,9 @@ func BuildAchievementCatalog(defs []AchCatalogDTO) (*AchievementCatalog, error) 
 		}
 
 		catalog.Defs[def.ID] = achDef
-		log.Printf("[ACHIEVEMENT DEBUG] Loaded Definition: %s (%s) with %d requirement groups", def.Code, def.ID, len(achDef.Groups))
 	}
 
-	for key, targets := range catalog.InvertedIndex {
-		log.Printf("[ACHIEVEMENT DEBUG] InvertedIndex Registered Key '%s' -> %d Target(s)", key, len(targets))
-	}
+	slog.Debug("achievement catalog loaded", "definitions", len(catalog.Defs), "index_keys", len(catalog.InvertedIndex))
 
 	return catalog, nil
 }
@@ -170,11 +167,11 @@ func NewAchievementEngine(catalog *AchievementCatalog, destroyChan <-chan struct
 }
 
 func (e *AchievementEngine) StartEventProcessor() {
-	log.Printf("[ACHIEVEMENT DEBUG] Engine Event Processor Started")
+	slog.Debug("achievement event processor started")
 	for {
 		select {
 		case <-e.gameDestroyChan:
-			log.Printf("[ACHIEVEMENT DEBUG] Engine Event Processor Stopping (Game Destroyed)")
+			slog.Debug("achievement event processor stopped, game destroyed")
 			return
 		case event, ok := <-e.eventChan:
 			if !ok {
@@ -243,15 +240,14 @@ func (e *AchievementEngine) PublishEvent(event AchievementEvent) {
 	e.RUnlock()
 
 	if listenerCount == 0 {
-		log.Printf("[ACHIEVEMENT DEBUG] PublishEvent DROPPED: Key '%s' has 0 active listeners", event.Key)
+		slog.Debug("achievement event dropped, no listeners", "key", event.Key)
 		return
 	}
 
 	select {
 	case e.eventChan <- event:
-		log.Printf("[ACHIEVEMENT DEBUG] PublishEvent QUEUED: Key '%s' | Amount: %d | Target Players: %v", event.Key, event.Amount, event.PlayerIDs)
 	default:
-		log.Printf("[ACHIEVEMENT DEBUG] PublishEvent DROPPED: Buffer Full for Key '%s'", event.Key)
+		slog.Warn("achievement event dropped, buffer full", "key", event.Key)
 	}
 }
 
@@ -261,18 +257,18 @@ func (e *AchievementEngine) evaluateEvent(event AchievementEvent) {
 	e.RUnlock()
 
 	if !exists || len(targets) == 0 {
-		log.Printf("[ACHIEVEMENT DEBUG] evaluateEvent: Key '%s' not found in InvertedIndex", event.Key)
+		slog.Debug("no achievement targets for key", "key", event.Key)
 		return
 	}
 
-	log.Printf("[ACHIEVEMENT DEBUG] evaluateEvent: Processing Key '%s' matching %d targets for players %v", event.Key, len(targets), event.PlayerIDs)
+	slog.Debug("evaluating achievement event", "key", event.Key, "targets", len(targets), "players", event.PlayerIDs)
 
 	for _, target := range targets {
 		e.RLock()
 		achDef, exists := e.catalog[target.AchievementID]
 		e.RUnlock()
 		if !exists {
-			log.Printf("[ACHIEVEMENT DEBUG] Target Achievement ID %s not found in Defs catalog", target.AchievementID)
+			slog.Error("achievement target not in catalog", "achievement_id", target.AchievementID)
 			continue
 		}
 
@@ -282,7 +278,7 @@ func (e *AchievementEngine) evaluateEvent(event AchievementEvent) {
 			e.RUnlock()
 
 			if !exists {
-				log.Printf("[ACHIEVEMENT DEBUG] Player '%s' not found in active playerSessions", playerID)
+				slog.Error("achievement player session not found", "player_id", playerID)
 				continue
 			}
 
@@ -338,7 +334,7 @@ func (e *AchievementEngine) checkAndApplyProgress(playerID string, p *PlayerProg
 					delete(p.ReqValues, k)
 				}
 			}
-			log.Printf("[ACHIEVEMENT DEBUG] TIME failed for group %d on achievement %s. Group reset.", target.GroupID, def.Code)
+			slog.Debug("achievement time requirement failed, group reset", "achievement", def.Code, "group", target.GroupID)
 		}
 
 	case strings.HasPrefix(eventKey, "game:"):
@@ -362,7 +358,7 @@ func (e *AchievementEngine) checkAndApplyProgress(playerID string, p *PlayerProg
 					delete(p.ReqValues, k)
 				}
 			}
-			log.Printf("[ACHIEVEMENT DEBUG] GAME evaluation failed for group %d on achievement %s. Group reset.", target.GroupID, def.Code)
+			slog.Debug("achievement game requirement failed, group reset", "achievement", def.Code, "group", target.GroupID)
 		}
 
 	default:
@@ -370,8 +366,8 @@ func (e *AchievementEngine) checkAndApplyProgress(playerID string, p *PlayerProg
 		newCount := p.ReqValues[reqKey]
 		conditionMet := newCount >= target.TargetValue
 
-		log.Printf("[ACHIEVEMENT DEBUG] Player '%s' | Cumulative Ach: %s | Group: %d | Bit: %d | Progress: %d/%d",
-			playerID, def.Code, target.GroupID, target.BitIndex, newCount, target.TargetValue)
+		slog.Debug("achievement progress", "player_id", playerID, "achievement", def.Code,
+			"group", target.GroupID, "bit", target.BitIndex, "progress", newCount, "target", target.TargetValue)
 
 		if conditionMet {
 			if p.GroupMasks[def.ID] == nil {
@@ -407,8 +403,7 @@ type AchievementUnlockedPayload struct {
 
 func (e *AchievementEngine) onAchievementUnlocked(playerID string, def *AchievementDef) {
 	message := fmt.Sprintf("[Achievement]: %s unlocked %s!", playerID, def.Title)
-	log.Printf("[Achievement] Player '%s' unlocked '%s' (%s)\n", playerID, def.Code, def.ID)
-	log.Printf("[ACHIEVEMENT DEBUG] Checking def fields: Code=%s, Title=%s, ID=%v, IsGlobal=%t\n", def.Code, def.Title, def.ID, def.IsGlobalAnnouncement)
+	slog.Info("achievement unlocked", "player_id", playerID, "achievement", def.Code, "achievement_id", def.ID)
 	ev := ServerEvent{
 		Type:     EventTypeAchievementUnlocked,
 		PlayerID: playerID,
@@ -422,7 +417,7 @@ func (e *AchievementEngine) onAchievementUnlocked(playerID string, def *Achievem
 	case e.serverEventChan <- ev:
 	case <-e.gameDestroyChan:
 		// Game is gone and the server listener with it; don't block forever.
-		log.Printf("[ACHIEVEMENT] Game destroyed, dropping unlock '%s' for '%s'", def.Code, playerID)
+		slog.Warn("achievement unlock dropped, game destroyed", "achievement", def.Code, "player_id", playerID)
 	}
 }
 

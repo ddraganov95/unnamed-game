@@ -23,14 +23,13 @@ func (t GameplayEventType) String() string {
 }
 
 func (game *Game) CreateLog(format string, args ...any) {
-	text := fmt.Sprintf(format, args...)
-	runes := []rune(text)
+	runes := []rune(fmt.Sprintf(format, args...))
 	if len(runes) > MaxMessageLength {
 		runes = runes[:MaxMessageLength]
 	}
 	game.Events = append(game.Events, Event{
-		Text:      text,
-		Runes:     []rune(text),
+		Text:      string(runes),
+		Runes:     runes,
 		CreatedAt: time.Now(),
 	})
 }

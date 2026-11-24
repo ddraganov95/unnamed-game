@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"uuid"
 
 	"unnamed-game/internal/game"
@@ -23,7 +23,7 @@ func (server *Server) InitializeConnection(g *game.Game, username string) error 
 	server.mu.Unlock()
 
 	if exists && oldConn != nil {
-		fmt.Printf("Player %s reconnecting. Closing old connection.\n", username)
+		slog.Info("closing old connection for reconnecting player", "player_id", username)
 		oldConn.Conn.Close()
 	}
 
@@ -125,7 +125,6 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			// Players still connected were disconnected by the game just
 			// before this event, so their sessions are already saved.
 			err := server.handleGameFinalization(g, event.Value)
-			log.Printf("Game ending with status %s", event.Value)
 			event.RespChan <- err
 		case game.EventTypeDeactivateGame:
 			server.mu.Lock()
@@ -147,11 +146,11 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			userID, exists := server.playerUsers[event.PlayerID]
 			server.mu.RUnlock()
 			if !exists {
-				log.Printf("[ACHIEVEMENT ERROR] Could not map PlayerID '%s' to DB userID", event.PlayerID)
+				slog.Error("achievement unlock: no DB user for player", "player_id", event.PlayerID)
 				break
 			}
 
-			log.Printf("[ACHIEVEMENT DB] Triggering unlock for User: %s | Ach: %v", userID, event.Value)
+			slog.Debug("triggering achievement unlock", "game_id", g.GameId, "user_id", userID, "achievement_id", event.Value)
 
 			ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
 			err := server.db.CallFunction(ctx, "player_achievement_unlock", userID, event.Value)
@@ -159,9 +158,9 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 
 			//ALWAYS capture and log the error returned by CallFunction
 			if err != nil {
-				log.Printf("[ACHIEVEMENT DB ERROR] Failed to unlock achievement for user %s: %v", userID, err)
+				slog.Error("failed to persist achievement unlock", "user_id", userID, "achievement_id", event.Value, "error", err)
 			} else {
-				log.Printf("[ACHIEVEMENT DB SUCCESS] Successfully persisted unlock for user %s", userID)
+				slog.Debug("achievement unlock persisted", "user_id", userID)
 			}
 			payload, ok := event.Object.(game.AchievementUnlockedPayload)
 			if ok {
@@ -176,7 +175,7 @@ func (server *Server) listenToGameEvents(g *game.Game) {
 			_, exists := server.activeConns[event.PlayerID]
 			server.mu.RUnlock()
 			if !exists {
-				log.Printf("[SERVER ERROR] No connection found for player %s", event.PlayerID)
+				slog.Warn("global chat dropped, no connection for player", "player_id", event.PlayerID)
 				continue
 			}
 			server.SendGlobalChatToDB(event.PlayerID, event.Value)
@@ -199,22 +198,22 @@ func (server *Server) handlePlayerDisconnectEvent(g *game.Game, playerID string,
 	connection, connExists := server.activeConns[playerID]
 	server.mu.RUnlock()
 	if connExists && connID != 0 && connection.ConnID != connID {
-		log.Printf("[DEBUG] Disconnect of old connection %d for %s; newer connection %d kept", connID, playerID, connection.ConnID)
+		slog.Debug("disconnect of old connection ignored", "game_id", g.GameId, "player_id", playerID, "conn_id", connID, "current_conn_id", connection.ConnID)
 		connExists = false
 	}
 
 	var userStats any
 	saved := false
 	if !ok {
-		log.Printf("[ERROR] No user ID found for player %s on disconnect; session not saved\n", playerID)
+		slog.Error("no user ID for player on disconnect, session not saved", "game_id", g.GameId, "player_id", playerID)
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
 		stats, err := server.db.UpdatePlayerAfterDisconnect(ctx, userID, payload.Unsaved, payload.AchievementProgress)
 		cancel()
 		if err != nil {
-			log.Printf("[ERROR] Failed to save stats for %s on disconnect: %v\n", playerID, err)
+			slog.Error("failed to save player stats on disconnect", "game_id", g.GameId, "player_id", playerID, "error", err)
 		} else {
-			log.Printf("[DB] Successfully saved session summary for %s\n", playerID)
+			slog.Debug("session summary saved", "game_id", g.GameId, "player_id", playerID)
 			userStats, saved = stats, true
 		}
 	}
@@ -250,7 +249,7 @@ func (server *Server) DisconnectPlayer(g *game.Game, playerID string, targetConn
 func (s *Server) processAndSaveEvents(g *game.Game, event game.ServerEvent) {
 	events, ok := event.Object.([]game.Event)
 	if !ok {
-		log.Printf("[ERROR] Type assertion failed: event.Object is not []game.Event for game %v", g.GameId)
+		slog.Error("level completed event has unexpected payload", "game_id", g.GameId, "type", fmt.Sprintf("%T", event.Object))
 		return
 	}
 	if len(events) == 0 {
@@ -268,10 +267,10 @@ func (s *Server) runAsync(taskName string, gameID uuid.UUID, dbOp func(ctx conte
 		defer cancel()
 
 		if err := dbOp(ctx); err != nil {
-			log.Printf("[ERROR] Failed to %s for game %s: %v", taskName, gameID, err)
+			slog.Error("async db task failed", "task", taskName, "game_id", gameID, "error", err)
 			return
 		}
-		log.Printf("[DB] Successfully completed %s for game %s", taskName, gameID)
+		slog.Debug("async db task completed", "task", taskName, "game_id", gameID)
 	}()
 }
 func (s *Server) handleGameFinalization(g *game.Game, status string) error {
@@ -284,10 +283,10 @@ func (s *Server) handleGameFinalization(g *game.Game, status string) error {
 	defer cancel()
 
 	if err := s.db.EndGameWithEvents(ctx, gameID, status, summary, events); err != nil {
-		log.Printf("[ERROR] Failed to finalize game %s in DB: %v", gameID, err)
+		slog.Error("failed to finalize game in db", "game_id", gameID, "reason", status, "error", err)
 		return err
 	}
 
-	log.Printf("[DB] Successfully finalized and persisted game %s (%s)", gameID, status)
+	slog.Info("game finalized", "game_id", gameID, "reason", status)
 	return nil
 }

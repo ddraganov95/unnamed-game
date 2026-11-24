@@ -50,7 +50,7 @@ func TestPlayTimeExcludesDisconnectedTime(t *testing.T) {
 	p, _ := g.GetPlayerByID("alice")
 	p.playStart = time.Now().Add(-3 * time.Second) // connected 3s ago
 
-	g.HandlePlayerDisconnect("alice")
+	g.HandlePlayerDisconnect("alice", DisconnectReasonSocketClosed)
 	ev := drainServerEvents(g)[0]
 	got := ev.Object.(PlayerDisconnectPayload).Unsaved.SessionDuration
 	if got < 3*time.Second || got > 4*time.Second {
@@ -61,7 +61,7 @@ func TestPlayTimeExcludesDisconnectedTime(t *testing.T) {
 	if err := g.HandlePlayerConnect(GameEvent{PlayerID: "alice", Object: defaultKeybinds, ConnID: 2}); err != nil {
 		t.Fatal(err)
 	}
-	g.HandlePlayerDisconnect("alice")
+	g.HandlePlayerDisconnect("alice", DisconnectReasonSocketClosed)
 	ev = drainServerEvents(g)[0]
 	if got := ev.Object.(PlayerDisconnectPayload).Unsaved.SessionDuration; got > 100*time.Millisecond {
 		t.Errorf("second save %v includes time spent disconnected", got)
@@ -77,7 +77,7 @@ func TestDisconnectPayloadCarriesAchievementProgress(t *testing.T) {
 	g.AchievementEngine.LoadPlayerAchievements("alice", freshStates(c))
 	g.AchievementEngine.evaluateEvent(AchievementEvent{PlayerIDs: []string{"alice"}, Key: "kill:goblin", Amount: 1})
 
-	g.HandlePlayerDisconnect("alice")
+	g.HandlePlayerDisconnect("alice", DisconnectReasonSocketClosed)
 	evs := drainServerEvents(g)
 	if len(evs) != 1 || evs[0].Type != EventTypeDisconnect {
 		t.Fatalf("events %+v", evs)
