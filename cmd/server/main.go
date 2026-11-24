@@ -20,6 +20,12 @@ func main() {
 	//Root signal context for the whole application lifetime
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// After the first signal, restore default handling so a second Ctrl+C or
+	// SIGTERM kills the process if shutdown hangs.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
 
 	//Initialize container
 	srv, err := server.NewServer(ctx)

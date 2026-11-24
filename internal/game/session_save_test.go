@@ -113,7 +113,7 @@ func TestDestroyDisconnectsActivePlayersBeforeGameDestroy(t *testing.T) {
 	addPlayerAt(t, g, "alice", Position{X: 5, Y: 5})
 	addPlayerAt(t, g, "bob", Position{X: 15, Y: 5})
 
-	withTimeout(t, 3*time.Second, "Destroy", func() { g.Destroy("idle_check") })
+	withTimeout(t, 3*time.Second, "Destroy", func() { g.Destroy(DestroyReasonIdleCheck) })
 
 	var types []EventType
 	disconnected := map[string]bool{}

@@ -187,6 +187,22 @@ func (s *socket) waitFor(t *testing.T, what string, pred func(string) bool) stri
 	}
 }
 
+// waitClosed drains the socket until the server closes it.
+func (s *socket) waitClosed(t *testing.T, what string) {
+	t.Helper()
+	deadline := time.After(wait)
+	for {
+		select {
+		case _, ok := <-s.msgs:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
 func isFrame(m string) bool { return strings.HasPrefix(m, "\033[H") }
 
 func frameContains(s string) func(string) bool {

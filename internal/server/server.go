@@ -13,6 +13,7 @@ import (
 
 	"unnamed-game/internal/db"
 	"unnamed-game/internal/game"
+	"unnamed-game/internal/safe"
 
 	"github.com/gorilla/websocket"
 )
@@ -20,8 +21,9 @@ import (
 const (
 	DBWriteQueueSize = 256
 	DBWriteTimeout   = 5 * time.Second
-	// ShutdownGameTimeout bounds how long shutdown waits for active games to finalize.
-	ShutdownGameTimeout = 10 * time.Second
+	// ShutdownTimeout is the total budget for graceful shutdown, shared by
+	// every stage. It must fit inside the process stop timeout (30s on ECS).
+	ShutdownTimeout = 25 * time.Second
 	// CloseCodeJoinRejected is the websocket close code sent when the game
 	// refuses the player after the upgrade (e.g. full). Mirrored in web/game.js.
 	CloseCodeJoinRejected = 4001
@@ -48,7 +50,14 @@ type Server struct {
 	Mux            *http.ServeMux
 	httpServer     *http.Server
 	dbWriteChan    chan dbWriteTask
-	nextConnID     atomic.Uint64
+	dbWriteDone    chan struct{} // closed once dbWriteWorker has drained and exited
+	// writeMu guards writesClosed. enqueueDBWrite and runAsync check the flag
+	// under RLock and register work; shutdown sets it under Lock, so no new
+	// write can start once shutdown is draining.
+	writeMu      sync.RWMutex
+	writesClosed bool
+	asyncWG      sync.WaitGroup // in-flight runAsync saves
+	nextConnID   atomic.Uint64
 }
 type ServerConfig struct {
 	Host string `json:"host"`
@@ -148,17 +157,23 @@ func NewServerWithDB(ctx context.Context, database *db.Database, config ServerCo
 		lobbyConns:     make(map[*ChatWSConnection]struct{}),
 		playerUsers:    make(map[string]uuid.UUID),
 		dbWriteChan:    make(chan dbWriteTask, DBWriteQueueSize),
+		dbWriteDone:    make(chan struct{}),
 		Mux:            http.NewServeMux(),
 		db:             database,
 		achievementCat: catalog,
 		serverConfig:   config,
 	}
-	go srv.dbWriteWorker(ctx)
+	go srv.dbWriteWorker()
 	game.InitGameRegistries()
 	events := []string{"achievement_unlocked", "global_chat"}
-	go database.ListenToDBEvents(ctx, events, srv.handleDBEvent)
+	go database.ListenToDBEvents(ctx, events, func(channel, payload string) {
+		safe.Call("db event", func() {
+			srv.handleDBEvent(channel, payload)
+		}, nil)
+	})
 	return srv, nil
 }
+
 // RegisterRoutes mounts every API, websocket and static-file route on Mux.
 func (srv *Server) RegisterRoutes(webDir string) {
 	srv.Mux.HandleFunc("POST /api/users", srv.HandleCreateUser)
@@ -199,15 +214,11 @@ func (s *Server) Run(ctx context.Context) error {
 	go func() {
 		defer close(shutdownDone)
 		<-ctx.Done()
-		slog.Info("shutdown signal received, closing HTTP server")
+		slog.Info("shutdown signal received, shutting down")
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 		defer cancel()
-
-		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
-			slog.Error("http shutdown forced", "error", err)
-		}
-		s.endActiveGamesOnShutdown()
+		s.shutdown(shutdownCtx)
 	}()
 
 	slog.Info("server listening", "addr", port)
@@ -234,24 +245,43 @@ func (server *Server) BuildGamePageURL(r *http.Request, host string, gameID uuid
 	return fmt.Sprintf("%s://%s/game.html?gameId=%s", scheme, host, gameID.String())
 }
 
-func (server *Server) dbWriteWorker(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case task := <-server.dbWriteChan:
-			writeCtx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
-			err := task.run(writeCtx)
-			cancel()
+// shutdown runs the stages in dependency order under one deadline: stop
+// accepting HTTP, close lobby sockets, end games (their rows and sessions are
+// saved), wait for in-flight saves, then drain the DB write queue.
+func (s *Server) shutdown(ctx context.Context) {
+	if err := s.httpServer.Shutdown(ctx); err != nil {
+		slog.Error("http shutdown forced", "error", err)
+	}
+	s.closeLobbyConnections()
+	s.endActiveGamesOnShutdown(ctx)
+	s.stopDBWrites(ctx)
+}
 
-			if err != nil {
-				slog.Error("db write failed", "task", task.name, "error", err)
-			}
+// dbWriteWorker drains dbWriteChan until stopDBWrites closes it. It does not
+// watch the signal context, so writes queued during shutdown still run.
+func (server *Server) dbWriteWorker() {
+	defer close(server.dbWriteDone)
+	for task := range server.dbWriteChan {
+		writeCtx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
+		var err error
+		safe.Call("db write "+task.name, func() {
+			err = task.run(writeCtx)
+		}, nil)
+		cancel()
+
+		if err != nil {
+			slog.Error("db write failed", "task", task.name, "error", err)
 		}
 	}
 }
 
 func (server *Server) enqueueDBWrite(name string, run func(context.Context) error) {
+	server.writeMu.RLock()
+	defer server.writeMu.RUnlock()
+	if server.writesClosed {
+		slog.Error("shutdown in progress, db write dropped", "task", name)
+		return
+	}
 	select {
 	case server.dbWriteChan <- dbWriteTask{name: name, run: run}:
 	default:
@@ -259,10 +289,57 @@ func (server *Server) enqueueDBWrite(name string, run func(context.Context) erro
 	}
 }
 
+// stopDBWrites refuses new writes, waits for in-flight game saves, then closes
+// the queue and waits for the worker to finish what is already queued.
+func (s *Server) stopDBWrites(ctx context.Context) {
+	s.writeMu.Lock()
+	s.writesClosed = true
+	s.writeMu.Unlock()
+
+	// No new runAsync can register now, so waiting on the WaitGroup is safe.
+	asyncDone := make(chan struct{})
+	go func() {
+		s.asyncWG.Wait()
+		close(asyncDone)
+	}()
+	select {
+	case <-asyncDone:
+	case <-ctx.Done():
+		slog.Warn("game saves still running at shutdown deadline")
+	}
+
+	close(s.dbWriteChan)
+	select {
+	case <-s.dbWriteDone:
+	case <-ctx.Done():
+		slog.Warn("db write queue not drained at shutdown deadline", "queued", len(s.dbWriteChan))
+	}
+}
+
+// closeLobbyConnections sends a "going away" close frame to every lobby chat
+// socket and closes it. Lobby sockets are not tied to a game, so nothing else
+// closes them during shutdown.
+func (s *Server) closeLobbyConnections() {
+	s.lobbyMu.Lock()
+	conns := make([]*ChatWSConnection, 0, len(s.lobbyConns))
+	for c := range s.lobbyConns {
+		conns = append(conns, c)
+	}
+	s.lobbyMu.Unlock()
+
+	for _, c := range conns {
+		// WriteControl may run concurrently with the lobby writer goroutine.
+		_ = c.Conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down"),
+			time.Now().Add(time.Second))
+		c.Conn.Close()
+	}
+}
+
 // endActiveGamesOnShutdown ends every active game with the normal destroy
 // path, so each one's DB row is finalized and its players' sessions saved.
-// It waits (bounded by ShutdownGameTimeout) for the games to deactivate.
-func (s *Server) endActiveGamesOnShutdown() {
+// It waits until ctx is done or the games have deactivated.
+func (s *Server) endActiveGamesOnShutdown(ctx context.Context) {
 	s.mu.RLock()
 	games := make([]*game.Game, 0, len(s.activeGames))
 	for _, g := range s.activeGames {
@@ -270,11 +347,16 @@ func (s *Server) endActiveGamesOnShutdown() {
 	}
 	s.mu.RUnlock()
 
+	// Destroy games in parallel: each game only locks its own state, and the
+	// DB pool limits how many saves actually run at once. Not waited on
+	// directly; the deadline loop below bounds the wait, so one stuck game
+	// can't hang shutdown.
 	for _, g := range games {
-		g.Destroy("server_shutdown")
+		safe.Go("shutdown destroy", func() {
+			g.Destroy(game.DestroyReasonServerShutdown)
+		}, nil)
 	}
 
-	deadline := time.Now().Add(ShutdownGameTimeout)
 	for {
 		s.mu.RLock()
 		remaining := len(s.activeGames)
@@ -282,10 +364,11 @@ func (s *Server) endActiveGamesOnShutdown() {
 		if remaining == 0 {
 			return
 		}
-		if time.Now().After(deadline) {
-			slog.Warn("games still active after shutdown timeout", "count", remaining)
+		select {
+		case <-ctx.Done():
+			slog.Warn("games still active at shutdown deadline", "count", remaining)
 			return
+		case <-time.After(50 * time.Millisecond):
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
 }
