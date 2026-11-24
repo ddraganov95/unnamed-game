@@ -13,6 +13,7 @@ import (
 
 	"unnamed-game/internal/db"
 	"unnamed-game/internal/game"
+	"unnamed-game/internal/safe"
 
 	"github.com/gorilla/websocket"
 )
@@ -165,9 +166,14 @@ func NewServerWithDB(ctx context.Context, database *db.Database, config ServerCo
 	go srv.dbWriteWorker()
 	game.InitGameRegistries()
 	events := []string{"achievement_unlocked", "global_chat"}
-	go database.ListenToDBEvents(ctx, events, srv.handleDBEvent)
+	go database.ListenToDBEvents(ctx, events, func(channel, payload string) {
+		safe.Call("db event", func() {
+			srv.handleDBEvent(channel, payload)
+		}, nil)
+	})
 	return srv, nil
 }
+
 // RegisterRoutes mounts every API, websocket and static-file route on Mux.
 func (srv *Server) RegisterRoutes(webDir string) {
 	srv.Mux.HandleFunc("POST /api/users", srv.HandleCreateUser)
@@ -257,7 +263,10 @@ func (server *Server) dbWriteWorker() {
 	defer close(server.dbWriteDone)
 	for task := range server.dbWriteChan {
 		writeCtx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
-		err := task.run(writeCtx)
+		var err error
+		safe.Call("db write "+task.name, func() {
+			err = task.run(writeCtx)
+		}, nil)
 		cancel()
 
 		if err != nil {
@@ -343,7 +352,9 @@ func (s *Server) endActiveGamesOnShutdown(ctx context.Context) {
 	// directly; the deadline loop below bounds the wait, so one stuck game
 	// can't hang shutdown.
 	for _, g := range games {
-		go g.Destroy(game.DestroyReasonServerShutdown)
+		safe.Go("shutdown destroy", func() {
+			g.Destroy(game.DestroyReasonServerShutdown)
+		}, nil)
 	}
 
 	for {

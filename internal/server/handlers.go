@@ -13,6 +13,7 @@ import (
 
 	"unnamed-game/internal/db"
 	"unnamed-game/internal/game"
+	"unnamed-game/internal/safe"
 	"uuid"
 
 	"github.com/gorilla/websocket"
@@ -219,7 +220,11 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer server.DisconnectPlayer(g, playerID, newConnection)
 
-	go server.streamFrames(g, playerID, newConnection)
+	// If the frame writer panics, close the socket: the reader then fails and
+	// the normal disconnect path runs.
+	safe.Go("stream frames", func() {
+		server.streamFrames(g, playerID, newConnection)
+	}, func(any) { conn.Close() })
 	server.readPlayerInputs(g, playerID, conn)
 }
 
@@ -246,7 +251,7 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 		Write:    make(chan string, 50),
 	}
 	server.lobbyConns[chatConn] = struct{}{}
-	go func() {
+	safe.Go("lobby chat writer", func() {
 		for msg := range chatConn.Write {
 			conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 			if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
@@ -254,7 +259,7 @@ func (server *Server) HandleLobbyChatWS(w http.ResponseWriter, r *http.Request) 
 				break
 			}
 		}
-	}()
+	}, func(any) { conn.Close() })
 	for _, historyMsg := range server.chatHistory {
 		if err := conn.WriteMessage(websocket.TextMessage, []byte(historyMsg)); err != nil {
 			requestLogger(r.Context()).Debug("lobby chat history write failed", "player_id", playerID, "error", err)
@@ -564,6 +569,7 @@ func (server *Server) HandleGetSelfConfig(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(userConfig)
 }
+
 // Keys hard-coded in game.Player.InitKeybindings (copy game ID, next level,
 // enter to type). A user keybind on one of these would be silently overridden.
 var reservedKeybindKeys = map[string]struct{}{

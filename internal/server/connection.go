@@ -9,6 +9,7 @@ import (
 	"uuid"
 
 	"unnamed-game/internal/game"
+	"unnamed-game/internal/safe"
 
 	"github.com/gorilla/websocket"
 )
@@ -116,79 +117,96 @@ func (server *Server) readPlayerInputs(g *game.Game, playerID string, conn *webs
 	}
 }
 
+// listenToGameEvents handles one game's server events until the game is
+// deactivated. Each event runs under recovery, so a bug in one handler is
+// logged and the loop keeps serving the game. Losing this loop would block the
+// game's destroy path.
 func (server *Server) listenToGameEvents(g *game.Game) {
 	for event := range g.ServerEventChan {
-		switch event.Type {
-		case game.EventTypeDisconnect:
-			payload, _ := event.Object.(game.PlayerDisconnectPayload)
-			server.handlePlayerDisconnectEvent(g, event.PlayerID, event.ConnID, payload)
-		case game.EventTypeGameDestroy:
-			// Players still connected were disconnected by the game just
-			// before this event, so their sessions are already saved.
-			err := server.handleGameFinalization(g, event.Value)
-			event.RespChan <- err
-		case game.EventTypeDeactivateGame:
-			server.mu.Lock()
-			delete(server.activeGames, g.GameId)
-			server.mu.Unlock()
+		stop := false
+		safe.Call("game server event", func() {
+			stop = server.handleServerEvent(g, event)
+		}, nil)
+		if stop {
 			return
-		case game.EventTypeCopyGame:
-			server.mu.RLock()
-			connection, exists := server.activeConns[event.PlayerID]
-			server.mu.RUnlock()
-			if exists {
-				if err := connection.WriteJSON(OutboundWSMessage{
-					Type:    "copy_clipboard",
-					Payload: event.Value,
-				}); err != nil {
-					slog.Debug("copy clipboard message not sent", "game_id", g.GameId, "player_id", event.PlayerID, "error", err)
-				}
-			}
-		case game.EventTypeAchievementUnlocked:
-			server.mu.RLock()
-			userID, exists := server.playerUsers[event.PlayerID]
-			server.mu.RUnlock()
-			if !exists {
-				slog.Error("achievement unlock: no DB user for player", "player_id", event.PlayerID)
-				break
-			}
-
-			slog.Debug("triggering achievement unlock", "game_id", g.GameId, "user_id", userID, "achievement_id", event.Value)
-
-			ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
-			err := server.db.CallFunction(ctx, "player_achievement_unlock", userID, event.Value)
-			cancel()
-
-			//ALWAYS capture and log the error returned by CallFunction
-			if err != nil {
-				slog.Error("failed to persist achievement unlock", "user_id", userID, "achievement_id", event.Value, "error", err)
-			} else {
-				slog.Debug("achievement unlock persisted", "user_id", userID)
-			}
-			payload, ok := event.Object.(game.AchievementUnlockedPayload)
-			if ok {
-				if !payload.IsGlobalAnnouncement {
-					g.GameChat <- payload.Message
-				}
-			}
-		case game.EventTypeLevelCompleted:
-			server.processAndSaveEvents(g, event)
-		case game.EventTypeGlobalChatMsg:
-			server.mu.RLock()
-			_, exists := server.activeConns[event.PlayerID]
-			server.mu.RUnlock()
-			if !exists {
-				slog.Warn("global chat dropped, no connection for player", "player_id", event.PlayerID)
-				continue
-			}
-			server.SendGlobalChatToDB(event.PlayerID, event.Value)
-		case game.EventTypeGameChatMsg:
-			g.BroadcastGameChat(event.PlayerID, event.Value)
-		default:
 		}
 	}
-
 }
+
+// handleServerEvent handles one server event and reports whether the game has
+// been deactivated, so the listener should exit.
+func (server *Server) handleServerEvent(g *game.Game, event game.ServerEvent) bool {
+	switch event.Type {
+	case game.EventTypeDisconnect:
+		payload, _ := event.Object.(game.PlayerDisconnectPayload)
+		server.handlePlayerDisconnectEvent(g, event.PlayerID, event.ConnID, payload)
+	case game.EventTypeGameDestroy:
+		// Players still connected were disconnected by the game just
+		// before this event, so their sessions are already saved.
+		err := server.handleGameFinalization(g, event.Value)
+		event.RespChan <- err
+	case game.EventTypeDeactivateGame:
+		server.mu.Lock()
+		delete(server.activeGames, g.GameId)
+		server.mu.Unlock()
+		return true
+	case game.EventTypeCopyGame:
+		server.mu.RLock()
+		connection, exists := server.activeConns[event.PlayerID]
+		server.mu.RUnlock()
+		if exists {
+			if err := connection.WriteJSON(OutboundWSMessage{
+				Type:    "copy_clipboard",
+				Payload: event.Value,
+			}); err != nil {
+				slog.Debug("copy clipboard message not sent", "game_id", g.GameId, "player_id", event.PlayerID, "error", err)
+			}
+		}
+	case game.EventTypeAchievementUnlocked:
+		server.mu.RLock()
+		userID, exists := server.playerUsers[event.PlayerID]
+		server.mu.RUnlock()
+		if !exists {
+			slog.Error("achievement unlock: no DB user for player", "player_id", event.PlayerID)
+			return false
+		}
+
+		slog.Debug("triggering achievement unlock", "game_id", g.GameId, "user_id", userID, "achievement_id", event.Value)
+
+		ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
+		err := server.db.CallFunction(ctx, "player_achievement_unlock", userID, event.Value)
+		cancel()
+
+		//ALWAYS capture and log the error returned by CallFunction
+		if err != nil {
+			slog.Error("failed to persist achievement unlock", "user_id", userID, "achievement_id", event.Value, "error", err)
+		} else {
+			slog.Debug("achievement unlock persisted", "user_id", userID)
+		}
+		payload, ok := event.Object.(game.AchievementUnlockedPayload)
+		if ok {
+			if !payload.IsGlobalAnnouncement {
+				g.GameChat <- payload.Message
+			}
+		}
+	case game.EventTypeLevelCompleted:
+		server.processAndSaveEvents(g, event)
+	case game.EventTypeGlobalChatMsg:
+		server.mu.RLock()
+		_, exists := server.activeConns[event.PlayerID]
+		server.mu.RUnlock()
+		if !exists {
+			slog.Warn("global chat dropped, no connection for player", "player_id", event.PlayerID)
+			return false
+		}
+		server.SendGlobalChatToDB(event.PlayerID, event.Value)
+	case game.EventTypeGameChatMsg:
+		g.BroadcastGameChat(event.PlayerID, event.Value)
+	default:
+	}
+	return false
+}
+
 // handlePlayerDisconnectEvent runs for every player the game disconnected
 // (quit, closed tab, AFK kick, game end). It always saves the unsaved part of
 // the session; then, if the player's socket is still registered, sends it the
@@ -279,7 +297,7 @@ func (s *Server) runAsync(taskName string, gameID uuid.UUID, dbOp func(ctx conte
 		return
 	}
 	s.asyncWG.Add(1)
-	go func() {
+	safe.Go("async db task", func() {
 		defer s.asyncWG.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), DBWriteTimeout)
 		defer cancel()
@@ -289,7 +307,7 @@ func (s *Server) runAsync(taskName string, gameID uuid.UUID, dbOp func(ctx conte
 			return
 		}
 		slog.Debug("async db task completed", "task", taskName, "game_id", gameID)
-	}()
+	}, nil)
 }
 func (s *Server) handleGameFinalization(g *game.Game, status string) error {
 	gameID := g.GameId
