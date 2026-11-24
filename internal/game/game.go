@@ -130,8 +130,11 @@ func (game *Game) StartGame() {
 
 // Tick runs one iteration of the game loop: process inputs and chat, update
 // players and the level, then render and push a frame to every active player.
+// The whole tick runs under game.Mu, so rendering never reads the level while
+// another goroutine (Destroy, disconnects, IdleTick) is mutating it.
 func (game *Game) Tick() {
 	game.Mu.Lock()
+	defer game.Mu.Unlock()
 	game.ProcessInputs()
 	game.PollChat()
 	for _, player := range game.GetActivePlayers() {
@@ -140,7 +143,6 @@ func (game *Game) Tick() {
 	if game.State == StateGamePlaying {
 		game.UpdateGame()
 	}
-	game.Mu.Unlock()
 
 	for _, player := range game.GetActivePlayers() {
 		var renderedFrame string

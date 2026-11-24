@@ -43,6 +43,25 @@ func TestDestroyStopsAllGameGoroutines(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
+// Tick renders the level while Destroy removes the connected player from it.
+// Both run under game.Mu, so this must not hit "concurrent map iteration and
+// map write" (fatal, not recoverable) or a data race under -race.
+func TestTickRenderDoesNotRaceWithDestroy(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		g := startRealGame(t)
+		connect(t, g, "alice")
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for j := 0; j < 50; j++ {
+				g.Tick()
+			}
+		}()
+		withTimeout(t, 5*time.Second, "Destroy", func() { g.Destroy("test") })
+		withTimeout(t, 5*time.Second, "Tick loop", func() { <-done })
+	}
+}
+
 // Inputs, connects, disconnects and chat from many goroutines while the real
 // loop runs. Catches deadlocks and panics; under -race also data races.
 func TestGameLoopUnderConcurrentEvents(t *testing.T) {
@@ -117,8 +136,9 @@ func TestGameLoopUnderConcurrentEvents(t *testing.T) {
 	withTimeout(t, 5*time.Second, "Destroy", func() { g.Destroy("test") })
 }
 
-// IdleTick (1-minute ticker) mutates players under the lock while Tick
-// renders frames AFTER releasing it. Only the race detector can see this.
+// IdleTick (1-minute ticker) mutates players under the lock while the game
+// loop ticks. Each tick (update + render) runs under the lock, so this checks
+// that the two never overlap.
 func TestIdleTickConcurrentWithGameLoop(t *testing.T) {
 	g := startRealGame(t)
 	connect(t, g, "alice")
