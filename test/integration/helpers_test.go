@@ -51,7 +51,7 @@ func startNode(t *testing.T, d *db.Database) *node {
 	ctx, cancel := context.WithCancel(context.Background())
 	var srv *server.Server
 	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		srv.Mux.ServeHTTP(w, r)
+		srv.Handler().ServeHTTP(w, r)
 	}))
 	host, port, _ := net.SplitHostPort(ts.Listener.Addr().String())
 	var err error

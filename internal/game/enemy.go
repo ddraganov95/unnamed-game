@@ -428,7 +428,6 @@ func (enemy *Enemy) CheckDeath(game *Game) {
 		})
 		game.EnemiesKilled++
 		enemy.DistributeXp(game)
-		game.CreateLog("Trying to remove enemy %s", enemy.GetID())
 		game.Level.RemoveEnemy(enemy)
 	}
 }

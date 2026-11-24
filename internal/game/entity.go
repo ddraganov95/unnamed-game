@@ -1,6 +1,6 @@
 package game
 
-import "log"
+import "log/slog"
 
 type Team uint8
 
@@ -75,11 +75,10 @@ func (game *Game) AddEnemy(enemy *Enemy) {
 
 func (level *Level) RemoveProjectile(projectile *Projectile) {
 	if projectile == nil {
-		log.Printf("[REMOVE FAILED] Attempted to remove nil projectile")
+		slog.Warn("attempted to remove nil projectile")
 		return
 	}
 	if projectile.OnRemove != nil {
-		log.Printf("[REMOVE] Trying to shoot arrows")
 		projectile.OnRemove()
 	}
 
@@ -90,7 +89,6 @@ func (level *Level) RemoveProjectile(projectile *Projectile) {
 func removeProjectileSlice(slice []*Projectile, target *Projectile) []*Projectile {
 	for i, p := range slice {
 		if p == target {
-			log.Printf(" -> MATCH FOUND at index %d! Removing...", i)
 			// Build a new slice instead of shifting in place: an in-place
 			// remove mutates the array a caller may be ranging over (UpdateGame).
 			out := make([]*Projectile, 0, len(slice)-1)
@@ -106,7 +104,6 @@ func (level *Level) RemoveEnemy(enemy *Enemy) {
 }
 func removeEnemySlice(slice []*Enemy, id string) []*Enemy {
 	for i, e := range slice {
-		log.Printf("comparing %s with %s", e.GetID(), id)
 		if e.GetID() == id {
 			// New slice, not an in-place shift: UpdateGame ranges over this array.
 			out := make([]*Enemy, 0, len(slice)-1)

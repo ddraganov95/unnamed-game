@@ -50,7 +50,7 @@ func newTestEnvOnDB(t *testing.T, d *db.Database) *testEnv {
 	ctx, cancel := context.WithCancel(context.Background())
 	var srv *Server
 	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		srv.Mux.ServeHTTP(w, r)
+		srv.Handler().ServeHTTP(w, r)
 	}))
 	host, port, _ := net.SplitHostPort(ts.Listener.Addr().String())
 	var err error

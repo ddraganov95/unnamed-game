@@ -6,7 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -67,7 +67,7 @@ func NewDatabaseFromConfig(ctx context.Context, config DBConfig) (*Database, err
 	if err := InitSchema(ctx, pool); err != nil {
 		return nil, err
 	}
-	log.Println("[DB] Successfully connected and updated USERS table schema.")
+	slog.Info("users table schema updated")
 	return &Database{pool: pool}, nil
 }
 
@@ -174,7 +174,6 @@ func ScanSingleRow[T any](rows pgx.Rows) (T, error) {
 	var result T
 	result, err := pgx.CollectOneRow(rows, pgx.RowToStructByNameLax[T])
 	if err != nil {
-		log.Printf("[DB SCAN ERROR DETAILS]: %v", err)
 		return result, fmt.Errorf("failed to scan row: %w", err)
 	}
 	return result, nil
@@ -211,17 +210,17 @@ func (db *Database) ListenToDBEvents(ctx context.Context, channels []string, han
 	for {
 		connected, err := db.listenLoop(ctx, channels, handler)
 		if ctx.Err() != nil {
-			log.Println("[DB LISTEN] Shutdown signal received. Stopping listener.")
+			slog.Info("db listener stopped, shutdown signal received")
 			return
 		}
 		if connected {
 			delay = listenRetryMin // it worked for a while; retry quickly
 		}
-		log.Printf("[DB ERROR] Listener connection lost: %v. Reconnecting in %v...", err, delay)
+		slog.Warn("db listener connection lost, reconnecting", "error", err, "delay", delay)
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
-			log.Println("[DB LISTEN] Shutdown signal received. Stopping listener.")
+			slog.Info("db listener stopped, shutdown signal received")
 			return
 		}
 		delay = min(delay*2, listenRetryMax)
@@ -249,7 +248,7 @@ func (db *Database) listenLoop(ctx context.Context, channels []string, handler N
 		}
 	}
 
-	log.Printf("[DB LISTEN] Listening on channels: %v", channels)
+	slog.Info("db listener started", "channels", channels)
 
 	for {
 		// WaitForNotification unblocks instantly when ctx is canceled

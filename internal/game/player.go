@@ -1,7 +1,7 @@
 package game
 
 import (
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode"
@@ -193,7 +193,7 @@ func (player *Player) TakeDamage(damage Damage, game *Game) {
 	damageToTake := int((damage.Value * (100 - PlayerDamageReductionPercent)) / 100)
 	player.CurrentHealth -= damageToTake
 	player.LastDamageRecieved = damage
-	log.Printf("[PLAYER]: Took damage %d from %s", player.LastDamageRecieved.Value, damage.EntityID)
+	slog.Debug("player took damage", "player_id", player.GetID(), "amount", damageToTake, "source", damage.EntityID)
 	player.DamageTaken += damageToTake
 	player.CheckDeath(game)
 	game.CreateLog("%s %s hits %s for %d damage", LogInfo, damage.EntityID, player.GetID(), damageToTake)
@@ -202,7 +202,7 @@ func (player *Player) CheckDeath(game *Game) {
 	if !player.IsAlive() {
 		killer := player.GetLastDamageTakenFrom()
 		player.KilledBy = killer
-		log.Printf("[PLAYER]: Killed by %s, last damage taken from: %s", killer, player.LastDamageRecieved.EntityID)
+		slog.Info("player killed", "player_id", player.GetID(), "killer", killer)
 		player.CurrentHealth = 0
 		game.CreateLog("%s %s Died to %s", LogSuccess, player.GetID(), killer)
 		game.Level.RemoveEntity(player)
@@ -314,7 +314,6 @@ func (player *Player) QuitGame(game *Game) {
 	game.HandlePlayerQuit(player.GetID())
 }
 func (player *Player) GetNextLevel(game *Game) {
-	log.Printf("[DEBUG] %s ,Pressed Space!", player.GetID())
 	// Only an alive player, and only during intermission, may start the next
 	// level (otherwise space would regenerate the level mid-fight).
 	if !player.IsAlive() || game.State != StateGameIntermission {

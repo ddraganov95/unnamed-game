@@ -2,7 +2,7 @@ package game
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"math/rand"
 	"time"
 )
@@ -27,7 +27,7 @@ type Zone struct {
 }
 
 func InitializeLevel() *Level {
-	fmt.Print("Preparing Level...\r\n")
+	slog.Debug("preparing level")
 	return &Level{
 		Entities:    make(map[string]GameObject),
 		posEntities: make(map[Position][]GameObject),
@@ -37,7 +37,7 @@ func InitializeLevel() *Level {
 }
 
 func NewLevel(game *Game) {
-	fmt.Println("Entering level gen...")
+	slog.Debug("entering level generation", "game_id", game.GameId)
 	level := InitializeLevel()
 	level.InitializeField()
 	level.InitializeWalls()
@@ -55,10 +55,10 @@ func NewLevel(game *Game) {
 		player.HealToFull()
 	}
 
-	fmt.Println("Players Spawned...")
+	slog.Debug("players spawned", "game_id", game.GameId)
 	rules := GetSpawnRulesForLevel(game.GetAveragePlayerLevel())
 	game.SpawnEnemies(rules)
-	fmt.Println("Finished level gen...")
+	slog.Debug("level generated", "game_id", game.GameId, "level", game.TotalLevels, "enemies", game.EnemiesSpawned)
 }
 
 func (level *Level) Update(game *Game) {
@@ -225,7 +225,6 @@ func (game *Game) SpawnEnemies(rules []SpawnRule) {
 			if _, taken := game.Level.GetEntityAt(pos); !taken {
 				id := fmt.Sprintf("%s %d", rule.EnemyType.String(), spawned+1)
 				enemy := CreateEnemy(id, pos, rule.EnemyType)
-				log.Printf("add enemy")
 				game.AddEnemy(enemy)
 				spawned++
 			}

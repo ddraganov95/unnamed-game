@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"log"
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
@@ -43,14 +42,12 @@ LIMIT $2 + 1;
 
 	rows, err := db.pool.Query(ctx, query, userID, pageSize)
 	if err != nil {
-		log.Printf("[DB ERROR]: GET User Leaderboard query fail %v", err)
 		return nil, fmt.Errorf("failed to query user leaderboard page: %w", err)
 	}
 	defer rows.Close()
 
 	users, err := pgx.CollectRows(rows, pgx.RowToStructByNameLax[UserLeaderboardView])
 	if err != nil {
-		log.Printf("[DB ERROR]: %v", err)
 		return nil, fmt.Errorf("failed to scan leaderboard rows: %w", err)
 	}
 	return users, nil
@@ -72,14 +69,12 @@ LIMIT $1 OFFSET $2
 	fetchLimit := pageSize + 1
 	rows, err := db.pool.Query(ctx, query, fetchLimit, offset)
 	if err != nil {
-		log.Printf("[DB ERROR]: GET User Leaderboard query fail %v", err)
 		return nil, fmt.Errorf("failed to query user leaderboard page: %w", err)
 	}
 	defer rows.Close()
 
 	users, err := pgx.CollectRows(rows, pgx.RowToStructByNameLax[UserLeaderboardView])
 	if err != nil {
-		log.Printf("[DB ERROR]: %v", err)
 		return nil, fmt.Errorf("failed to scan leaderboard rows: %w", err)
 	}
 	return users, nil

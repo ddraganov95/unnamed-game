@@ -26,7 +26,7 @@ func TestConnectNewAndExistingPlayer(t *testing.T) {
 	// Disconnect then reconnect on the same level: keep the old position.
 	press(g, p, 'd')
 	pos := p.GetPosition()
-	g.HandlePlayerDisconnect("alice")
+	g.HandlePlayerDisconnect("alice", DisconnectReasonSocketClosed)
 	if _, ok := g.GetActivePlayerById("alice"); ok {
 		t.Fatal("player still active after disconnect")
 	}
@@ -52,7 +52,7 @@ func TestConnectNewAndExistingPlayer(t *testing.T) {
 func TestReconnectAfterLevelChangeRespawns(t *testing.T) {
 	g := newTestGame(t)
 	p := addPlayerAt(t, g, "alice", Position{X: 50, Y: 40})
-	g.HandlePlayerDisconnect("alice")
+	g.HandlePlayerDisconnect("alice", DisconnectReasonSocketClosed)
 	drainServerEvents(g)
 	g.LevelsCompleted++ // the others moved on to a new level
 
@@ -73,7 +73,7 @@ func TestReconnectAfterLevelChangeRespawns(t *testing.T) {
 func TestReconnectWhenOldTileTakenFallsBackToSpawn(t *testing.T) {
 	g := newTestGame(t)
 	p := addPlayerAt(t, g, "alice", Position{X: 50, Y: 40})
-	g.HandlePlayerDisconnect("alice")
+	g.HandlePlayerDisconnect("alice", DisconnectReasonSocketClosed)
 	drainServerEvents(g)
 	addEnemyAt(g, "g", EnemyGoblin, Position{X: 50, Y: 40})
 
@@ -133,7 +133,7 @@ func TestConnectEnforcesCapacity(t *testing.T) {
 		t.Errorf("reconnect of active player rejected: %v", err)
 	}
 	// Once someone leaves, a new player fits again.
-	g.HandlePlayerDisconnect("p1")
+	g.HandlePlayerDisconnect("p1", DisconnectReasonSocketClosed)
 	drainServerEvents(g)
 	if err := g.HandlePlayerConnect(GameEvent{PlayerID: "extra", Object: defaultKeybinds}); err != nil {
 		t.Errorf("connect after a player left: %v", err)
@@ -447,7 +447,7 @@ func TestKeyEventResetsAFKAndIgnoresDisconnected(t *testing.T) {
 		t.Fatalf("key event: afk=%d queue=%v", p.AFKMinutes, p.KeyQueue)
 	}
 
-	g.HandlePlayerDisconnect("alice")
+	g.HandlePlayerDisconnect("alice", DisconnectReasonSocketClosed)
 	p.KeyQueue = nil
 	g.EventChan <- GameEvent{Type: EventTypeKey, PlayerID: "alice", Key: 'd'}
 	g.ProcessInputs()

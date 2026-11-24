@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 	"uuid"
 
@@ -53,7 +52,6 @@ func (db *Database) UpsertUser(ctx context.Context, playerID string) (*UserRef, 
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("Returned user_id: %s, player_id: %s", ref.UserID, ref.PlayerID)
 	return &ref, nil
 }
 func (db *Database) UpdatePlayerAfterDisconnect(
@@ -202,12 +200,10 @@ func (db *Database) FetchUserSummary(ctx context.Context, userID string) (*UserP
 
 	rows, err := db.pool.Query(ctx, query, userID)
 	if err != nil {
-		log.Printf("[DB ERROR]:GET User Summary query fail %v", err) // Print full error description
 		return nil, fmt.Errorf("failed to scan updated user: %w", err)
 	}
 	userProfile, err := pgx.CollectOneRow(rows, pgx.RowToStructByNameLax[UserProfileSummary])
 	if err != nil {
-		log.Printf("[DB ERROR]: %v", err) // Print full error description
 		return nil, fmt.Errorf("failed to scan updated user: %w", err)
 	}
 
