@@ -36,13 +36,21 @@ func InitializeLevel() *Level {
 	}
 }
 
-func NewLevel(game *Game) {
-	slog.Debug("entering level generation", "game_id", game.GameId)
+// newLevelLayout builds the terrain and chooses the player and enemy spawn
+// points. Spawn points are picked from cells with a clear exit path, so the
+// layout is valid before any players or enemies are placed.
+func newLevelLayout() *Level {
 	level := InitializeLevel()
 	level.InitializeField()
 	level.InitializeWalls()
 	level.InitializeZoneObjects()
 	level.InitializeSpawnPoints()
+	return level
+}
+
+func NewLevel(game *Game) {
+	slog.Debug("entering level generation", "game_id", game.GameId)
+	level := newLevelLayout()
 
 	game.Level = level
 	game.TotalLevels++
