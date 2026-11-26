@@ -160,12 +160,18 @@ func TestNewLevelInvariants(t *testing.T) {
 		if len(level.PlayerSpawnPoints) != PlayerSpawnPointsPerLevel {
 			t.Fatalf("seed %d: %d player spawn points, want %d", seed, len(level.PlayerSpawnPoints), PlayerSpawnPointsPerLevel)
 		}
+		// Exit paths are checked on the layout, before enemies and players are
+		// placed: a spawn that is clear at selection may later be blocked by an
+		// enemy, which is expected.
+		layout := newLevelLayout()
+		for _, sp := range layout.PlayerSpawnPoints {
+			if !layout.HasClearExitPath(sp) {
+				t.Fatalf("seed %d: spawn point %v has no clear exit path at selection", seed, sp)
+			}
+		}
 		for _, sp := range level.PlayerSpawnPoints {
 			if _, blocked := level.GetBlockerAt(sp); blocked {
 				t.Fatalf("seed %d: spawn point %v blocked", seed, sp)
-			}
-			if !level.HasClearExitPath(sp) {
-				t.Fatalf("seed %d: spawn point %v has no clear exit path", seed, sp)
 			}
 		}
 		if len(level.Enemies) == 0 {
